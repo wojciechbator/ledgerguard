@@ -30,3 +30,41 @@ jobs:
         run: cargo test --all-targets --all-features
       - name: Build release
         run: cargo build --release
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ledgerguard
+          POSTGRES_USER: ledgerguard
+          POSTGRES_PASSWORD: ledgerguard-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledgerguard -d ledgerguard"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://ledgerguard:ledgerguard-test@127.0.0.1:5432/ledgerguard
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.89.0
+      - uses: Swatinem/rust-cache@v2
+      - name: PostgreSQL repository contract
+        run: cargo test --test postgres_repository -- --ignored --nocapture
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate Compose
+        env:
+          POSTGRES_PASSWORD: ledgerguard-test
+        run: docker compose config --quiet
+      - name: Build runtime image
+        run: docker build --tag ledgerguard:ci .
