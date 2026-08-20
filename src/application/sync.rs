@@ -2,11 +2,13 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 use thiserror::Error;
+use uuid::Uuid;
 
 use super::{
-    AccountingProvider, AccountingSource, AccountingSourceError, LedgerRepository, RepositoryError,
+    AccountingProvider, AccountingRecord, AccountingSource, AccountingSourceError, LedgerRepository,
+    RepositoryError,
 };
-use crate::domain::{LedgerEntry, Month};
+use crate::domain::{LedgerEntry, Month, SourceSystem};
 
 const MAX_EXTERNAL_ID_BYTES: usize = 256;
 
@@ -33,8 +35,27 @@ pub async fn sync_month(
     month: Month,
 ) -> Result<SyncReport, SyncError> {
     let descriptor = source.descriptor();
-    let entries = source.fetch_entries(month).await?;
-    validate_batch(descriptor.provider, month, &entries)?;
+    let records = source.fetch_records(month).await?;
+    validate_batch(month, &records)?;
+
+    let provenance = SourceSystem::new(descriptor.provider.as_str())
+        .expect("built-in accounting provider names are valid source slugs");
+    let entries = records
+        .into_iter()
+        .map(|record| LedgerEntry {
+            id: Uuid::new_v4(),
+            external_id: record.external_id,
+            kind: record.kind,
+            booked_on: record.booked_on,
+            gross: record.gross,
+            net: record.net,
+            vat: record.vat,
+            category: record.category,
+            counterparty: record.counterparty,
+            source: provenance.clone(),
+        })
+        .collect::<Vec<_>>();
+
     repository.upsert_entries(&entries).await?;
 
     Ok(SyncReport {
@@ -44,15 +65,11 @@ pub async fn sync_month(
     })
 }
 
-fn validate_batch(
-    provider: AccountingProvider,
-    month: Month,
-    entries: &[LedgerEntry],
-) -> Result<(), SyncError> {
-    let mut external_ids = HashSet::with_capacity(entries.len());
+fn validate_batch(month: Month, records: &[AccountingRecord]) -> Result<(), SyncError> {
+    let mut external_ids = HashSet::with_capacity(records.len());
 
-    for entry in entries {
-        let external_id = entry.external_id.trim();
+    for record in records {
+        let external_id = record.external_id.trim();
         if external_id.is_empty() {
             return Err(SyncError::InvalidBatch(
                 "external_id must not be empty".to_owned(),
@@ -68,16 +85,10 @@ fn validate_batch(
                 "duplicate external_id in one batch: {external_id}"
             )));
         }
-        if !month.contains(entry.booked_on) {
+        if !month.contains(record.booked_on) {
             return Err(SyncError::InvalidBatch(format!(
-                "entry {} is outside requested month",
-                entry.external_id
-            )));
-        }
-        if entry.source.as_str() != provider.as_str() {
-            return Err(SyncError::InvalidBatch(format!(
-                "entry {} claims source {}, expected {}",
-                entry.external_id, entry.source, provider
+                "record {} is outside requested month",
+                record.external_id
             )));
         }
     }
@@ -92,16 +103,15 @@ mod tests {
     use async_trait::async_trait;
     use chrono::NaiveDate;
     use rust_decimal_macros::dec;
-    use uuid::Uuid;
 
     use super::*;
     use crate::{
         application::{ProviderCapabilities, ProviderDescriptor},
-        domain::{EntryKind, Money, SourceSystem},
+        domain::{EntryKind, Money},
     };
 
     struct FakeSource {
-        entries: Vec<LedgerEntry>,
+        records: Vec<AccountingRecord>,
     }
 
     #[async_trait]
@@ -116,11 +126,11 @@ mod tests {
             }
         }
 
-        async fn fetch_entries(
+        async fn fetch_records(
             &self,
             _month: Month,
-        ) -> Result<Vec<LedgerEntry>, AccountingSourceError> {
-            Ok(self.entries.clone())
+        ) -> Result<Vec<AccountingRecord>, AccountingSourceError> {
+            Ok(self.records.clone())
         }
     }
 
@@ -144,9 +154,8 @@ mod tests {
         }
     }
 
-    fn entry(external_id: &str, source: &str, day: u32) -> LedgerEntry {
-        LedgerEntry {
-            id: Uuid::new_v4(),
+    fn record(external_id: &str, day: u32) -> AccountingRecord {
+        AccountingRecord {
             external_id: external_id.to_owned(),
             kind: EntryKind::Expense,
             booked_on: NaiveDate::from_ymd_opt(2026, 8, day).unwrap(),
@@ -155,14 +164,13 @@ mod tests {
             vat: None,
             category: None,
             counterparty: None,
-            source: SourceSystem::new(source).unwrap(),
         }
     }
 
     #[tokio::test]
-    async fn valid_batch_is_persisted_once() {
+    async fn valid_batch_gets_application_owned_identity_and_provenance() {
         let source = FakeSource {
-            entries: vec![entry("42", "saldeo", 20)],
+            records: vec![record("42", 20)],
         };
         let repository = CaptureRepository::default();
         let month = Month::new(2026, 8).unwrap();
@@ -170,27 +178,16 @@ mod tests {
         let report = sync_month(&source, &repository, month).await.unwrap();
 
         assert_eq!(report.imported, 1);
-        assert_eq!(repository.entries.lock().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn provider_spoofing_is_rejected_before_persistence() {
-        let source = FakeSource {
-            entries: vec![entry("42", "infakt", 20)],
-        };
-        let repository = CaptureRepository::default();
-        let month = Month::new(2026, 8).unwrap();
-
-        let error = sync_month(&source, &repository, month).await.unwrap_err();
-
-        assert!(error.to_string().contains("claims source infakt, expected saldeo"));
-        assert!(repository.entries.lock().unwrap().is_empty());
+        let entries = repository.entries.lock().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source.as_str(), "saldeo");
+        assert_ne!(entries[0].id, Uuid::nil());
     }
 
     #[tokio::test]
     async fn duplicate_external_ids_are_rejected_before_persistence() {
         let source = FakeSource {
-            entries: vec![entry("42", "saldeo", 20), entry("42", "saldeo", 21)],
+            records: vec![record("42", 20), record("42", 21)],
         };
         let repository = CaptureRepository::default();
         let month = Month::new(2026, 8).unwrap();
@@ -198,6 +195,23 @@ mod tests {
         let error = sync_month(&source, &repository, month).await.unwrap_err();
 
         assert!(error.to_string().contains("duplicate external_id"));
+        assert!(repository.entries.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn out_of_period_records_are_rejected_before_persistence() {
+        let source = FakeSource {
+            records: vec![AccountingRecord {
+                booked_on: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+                ..record("42", 20)
+            }],
+        };
+        let repository = CaptureRepository::default();
+        let month = Month::new(2026, 8).unwrap();
+
+        let error = sync_month(&source, &repository, month).await.unwrap_err();
+
+        assert!(error.to_string().contains("outside requested month"));
         assert!(repository.entries.lock().unwrap().is_empty());
     }
 }

@@ -1,10 +1,11 @@
 use std::{fmt, str::FromStr};
 
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::{LedgerEntry, Month};
+use crate::domain::{EntryKind, Money, Month};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +88,23 @@ pub struct ProviderDescriptor {
     pub capabilities: ProviderCapabilities,
 }
 
+/// Provider-neutral record returned by an accounting adapter.
+///
+/// Adapters do not choose internal UUIDs or provenance. The application layer
+/// attaches those after validating the batch, keeping infrastructure details
+/// out of the domain identity model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountingRecord {
+    pub external_id: String,
+    pub kind: EntryKind,
+    pub booked_on: NaiveDate,
+    pub gross: Money,
+    pub net: Option<Money>,
+    pub vat: Option<Money>,
+    pub category: Option<String>,
+    pub counterparty: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum AccountingSourceError {
     #[error("{provider} is not configured; missing: {missing}")]
@@ -115,7 +133,10 @@ pub enum AccountingSourceError {
 pub trait AccountingSource: Send + Sync {
     fn descriptor(&self) -> ProviderDescriptor;
 
-    async fn fetch_entries(&self, month: Month) -> Result<Vec<LedgerEntry>, AccountingSourceError>;
+    async fn fetch_records(
+        &self,
+        month: Month,
+    ) -> Result<Vec<AccountingRecord>, AccountingSourceError>;
 }
 
 #[cfg(test)]
