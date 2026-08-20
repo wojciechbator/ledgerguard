@@ -116,12 +116,7 @@ mod tests {
                 .map(|(_, value)| value.as_str()),
             Some("d73710fdff6acc96361f5b9cb3425cee")
         );
-        assert!(
-            !request
-                .parameters
-                .iter()
-                .any(|(_, value)| value == "token")
-        );
+        assert!(!request.parameters.iter().any(|(_, value)| value == "token"));
     }
 
     #[test]
@@ -132,15 +127,7 @@ mod tests {
     #[test]
     fn empty_and_duplicate_parameters_are_rejected_before_signing() {
         assert_eq!(
-            signed_request(
-                SaldeoHttpMethod::Get,
-                "/x",
-                "user",
-                "token",
-                "",
-                &[]
-            )
-            .unwrap_err(),
+            signed_request(SaldeoHttpMethod::Get, "/x", "user", "token", "", &[]).unwrap_err(),
             SaldeoProtocolError::EmptyParameter("req_id".to_owned())
         );
         assert_eq!(

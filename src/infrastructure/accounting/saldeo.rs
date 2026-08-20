@@ -125,6 +125,21 @@ impl AccountingSource for SaldeoAdapter {
         }
     }
 
+    fn validate_configuration(&self) -> Result<(), AccountingSourceError> {
+        let completely_unconfigured = self.settings.username.is_none()
+            && self.settings.api_token.is_none()
+            && self.settings.company_program_id.is_none();
+        if completely_unconfigured {
+            return Ok(());
+        }
+
+        self.company_list_probe_request()?;
+        if self.scope_configured() {
+            self.document_list_request()?;
+        }
+        Ok(())
+    }
+
     async fn fetch_records(
         &self,
         _month: Month,
@@ -187,11 +202,29 @@ mod tests {
                 .iter()
                 .any(|(key, value)| key == "policy" && value == "SALDEO")
         );
+        assert!(!request.parameters.iter().any(|(_, value)| value == "token"));
+    }
+
+    #[test]
+    fn preflight_allows_absent_credentials_but_rejects_partial_configuration() {
+        let empty = SaldeoSettings {
+            base_url: "https://saldeo.brainshare.pl".to_owned(),
+            username: None,
+            api_token: None,
+            company_program_id: None,
+        };
+        assert!(SaldeoAdapter::new(empty).validate_configuration().is_ok());
+
+        let partial = SaldeoSettings {
+            base_url: "https://saldeo.brainshare.pl".to_owned(),
+            username: Some("user".to_owned()),
+            api_token: None,
+            company_program_id: None,
+        };
         assert!(
-            !request
-                .parameters
-                .iter()
-                .any(|(_, value)| value == "token")
+            SaldeoAdapter::new(partial)
+                .validate_configuration()
+                .is_err()
         );
     }
 }
