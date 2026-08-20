@@ -67,7 +67,10 @@ impl SaldeoAdapter {
             username,
             token,
             &Uuid::new_v4().to_string(),
-            &[("company_program_id", company_program_id), ("policy", "SALDEO")],
+            &[
+                ("company_program_id", company_program_id),
+                ("policy", "SALDEO"),
+            ],
         )
         .map_err(|error| AccountingSourceError::InvalidData {
             provider: AccountingProvider::Saldeo,
