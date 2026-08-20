@@ -1,7 +1,4 @@
-use std::{
-    ops::{Add, AddAssign},
-    str::FromStr,
-};
+use std::str::FromStr;
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -51,6 +48,10 @@ impl Money {
     pub const fn amount(self) -> Decimal {
         self.0
     }
+
+    pub fn checked_add(self, rhs: Self) -> Result<Self, MoneyError> {
+        Self::non_negative(self.0 + rhs.0)
+    }
 }
 
 impl Serialize for Money {
@@ -70,20 +71,6 @@ impl<'de> Deserialize<'de> for Money {
         let raw = String::deserialize(deserializer)?;
         let amount = Decimal::from_str(&raw).map_err(de::Error::custom)?;
         Self::non_negative(amount).map_err(de::Error::custom)
-    }
-}
-
-impl Add for Money {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign for Money {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
     }
 }
 
@@ -123,5 +110,12 @@ mod tests {
     fn rejects_values_outside_numeric_20_2_storage_range() {
         let too_large = Decimal::from_str("1000000000000000000").unwrap();
         assert_eq!(Money::non_negative(too_large).unwrap_err(), MoneyError::TooLarge);
+    }
+
+    #[test]
+    fn addition_cannot_bypass_supported_range() {
+        let maximum = Money::non_negative(Decimal::from_str(MAX_AMOUNT).unwrap()).unwrap();
+        let one_cent = Money::non_negative(dec!(0.01)).unwrap();
+        assert_eq!(maximum.checked_add(one_cent).unwrap_err(), MoneyError::TooLarge);
     }
 }
