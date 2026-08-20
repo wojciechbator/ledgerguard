@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
 BACKUP_DIR="${ROOT_DIR}/backups"
 WAIT_SECONDS="${LEDGERGUARD_DEPLOY_WAIT_SECONDS:-90}"
+TARGET="${1:-}"
 
 cd "${ROOT_DIR}"
 
@@ -77,18 +78,32 @@ backup_database_if_running() {
 
 update_checkout() {
   if [[ ! -d .git ]]; then
+    [[ -z "${TARGET}" ]] || die 'exact target deployment requires a Git checkout'
     return 0
   fi
 
   local branch
   branch="$(git branch --show-current)"
   if [[ "${branch}" != "main" ]]; then
+    [[ -z "${TARGET}" ]] || die "exact deployment requires main, got=${branch:-detached}"
     log "checkout is on ${branch}; skipping git pull (deploying current checkout)"
     return 0
   fi
 
   if ! git diff --quiet || ! git diff --cached --quiet; then
     die "working tree is dirty; commit/stash changes before deployment"
+  fi
+
+  if [[ -n "${TARGET}" ]]; then
+    [[ "${TARGET}" =~ ^[0-9a-f]{40}$ ]] || die 'target must be a full lowercase 40-character SHA'
+    log "fetching exact validated main revision ${TARGET}"
+    git fetch --quiet origin main
+    local fetched
+    fetched="$(git rev-parse FETCH_HEAD)"
+    [[ "${fetched}" == "${TARGET}" ]] || die "origin/main moved before deploy: fetched=${fetched} target=${TARGET}"
+    git merge --ff-only "${TARGET}"
+    [[ "$(git rev-parse HEAD)" == "${TARGET}" ]] || die 'checkout did not converge to exact target'
+    return 0
   fi
 
   log "updating main with fast-forward only"
@@ -138,14 +153,17 @@ main() {
   docker compose --env-file "${ENV_FILE}" up -d --remove-orphans
   wait_for_health
 
-  local port
+  local port deployed_sha
   port="$(read_env_value LEDGERGUARD_PORT)"
   port="${port:-8088}"
+  deployed_sha="unknown"
+  [[ ! -d .git ]] || deployed_sha="$(git rev-parse HEAD)"
   log "deployment healthy"
   docker compose --env-file "${ENV_FILE}" ps
   printf '\nDashboard: http://127.0.0.1:%s/\n' "${port}"
   printf 'API token:  %s (kept local; do not paste it into chat)\n' "${ENV_FILE}"
   printf 'Remote access: use your private reverse proxy/Tailscale path or an SSH tunnel.\n'
+  printf 'LEDGERGUARD_DEPLOY=PASS sha=%s health=healthy\n' "${deployed_sha}"
 }
 
 main "$@"
