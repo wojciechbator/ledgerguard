@@ -8,13 +8,24 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - ledgerguard-postgres:/var/lib/postgresql/data
+    networks:
+      - database
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ledgerguard -d ledgerguard"]
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 5s
     security_opt:
       - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   app:
     build: .
@@ -27,17 +38,27 @@ services:
       DATABASE_URL: postgres://ledgerguard:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/ledgerguard
       LEDGERGUARD_BIND_ADDR: 0.0.0.0:8080
       LEDGERGUARD_ACCOUNTING_PROVIDER: ${LEDGERGUARD_ACCOUNTING_PROVIDER:-saldeo}
+      LEDGERGUARD_API_TOKEN: ${LEDGERGUARD_API_TOKEN:-}
+      LEDGERGUARD_AUTH_DISABLED: "false"
+      LEDGERGUARD_LIVE_SYNC_ENABLED: ${LEDGERGUARD_LIVE_SYNC_ENABLED:-false}
       RUST_LOG: ${RUST_LOG:-ledgerguard=info,tower_http=info}
+      SALDEO_BASE_URL: ${SALDEO_BASE_URL:-https://saldeo.brainshare.pl}
       SALDEO_USERNAME: ${SALDEO_USERNAME:-}
       SALDEO_API_TOKEN: ${SALDEO_API_TOKEN:-}
+      SALDEO_COMPANY_PROGRAM_ID: ${SALDEO_COMPANY_PROGRAM_ID:-}
       FAKTUROWNIA_ACCOUNT_DOMAIN: ${FAKTUROWNIA_ACCOUNT_DOMAIN:-}
+      FAKTUROWNIA_DEPARTMENT_ID: ${FAKTUROWNIA_DEPARTMENT_ID:-}
       FAKTUROWNIA_API_TOKEN: ${FAKTUROWNIA_API_TOKEN:-}
       INFAKT_API_KEY: ${INFAKT_API_KEY:-}
       WFIRMA_ACCESS_KEY: ${WFIRMA_ACCESS_KEY:-}
       WFIRMA_SECRET_KEY: ${WFIRMA_SECRET_KEY:-}
       WFIRMA_APP_KEY: ${WFIRMA_APP_KEY:-}
+      WFIRMA_COMPANY_ID: ${WFIRMA_COMPANY_ID:-}
     ports:
       - "127.0.0.1:${LEDGERGUARD_PORT:-8088}:8080"
+    networks:
+      - database
+      - egress
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -45,6 +66,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
     stop_grace_period: 10s
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
@@ -52,6 +75,16 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  database:
+    internal: true
+  egress:
 
 volumes:
   ledgerguard-postgres:
