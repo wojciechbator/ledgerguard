@@ -15,6 +15,10 @@ impl SecretString {
             .map(Self)
     }
 
+    fn required_from_env(name: &'static str) -> Result<Self> {
+        Self::from_env(name).with_context(|| format!("{name} is required"))
+    }
+
     #[must_use]
     pub fn expose(&self) -> &str {
         &self.0
@@ -63,18 +67,18 @@ pub struct AccountingSettings {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub bind_addr: SocketAddr,
-    pub database_url: String,
+    pub database_url: SecretString,
     pub accounting: AccountingSettings,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let bind_addr = env::var("LEDGERGUARD_BIND_ADDR")
-            .unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
+        let bind_addr =
+            env::var("LEDGERGUARD_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
         let bind_addr = SocketAddr::from_str(&bind_addr)
             .with_context(|| format!("invalid LEDGERGUARD_BIND_ADDR: {bind_addr}"))?;
 
-        let database_url = env::var("DATABASE_URL").context("DATABASE_URL is required")?;
+        let database_url = SecretString::required_from_env("DATABASE_URL")?;
         let provider = env::var("LEDGERGUARD_ACCOUNTING_PROVIDER")
             .unwrap_or_else(|_| AccountingProvider::default().to_string())
             .parse()

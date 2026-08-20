@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(&config.database_url)
+        .connect(config.database_url.expose())
         .await
         .context("failed to connect to PostgreSQL")?;
 
