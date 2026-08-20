@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
 
-const MAX_AMOUNT: &str = "999999999999999999.99";
+const MAX_AMOUNT: Decimal = Decimal::from_parts(1_661_992_959, 1_808_227_885, 5, false, 2);
 const MAX_SCALE: u32 = 2;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -38,8 +38,7 @@ impl Money {
         if amount.scale() > MAX_SCALE {
             return Err(MoneyError::TooPrecise);
         }
-        let maximum = Decimal::from_str(MAX_AMOUNT).expect("MAX_AMOUNT is a valid decimal");
-        if amount > maximum {
+        if amount > MAX_AMOUNT {
             return Err(MoneyError::TooLarge);
         }
         Ok(Self(amount))
@@ -119,8 +118,14 @@ mod tests {
     }
 
     #[test]
+    fn maximum_matches_numeric_20_2_contract() {
+        assert_eq!(MAX_AMOUNT.to_string(), "999999999999999999.99");
+        assert!(Money::non_negative(MAX_AMOUNT).is_ok());
+    }
+
+    #[test]
     fn addition_cannot_bypass_supported_range() {
-        let maximum = Money::non_negative(Decimal::from_str(MAX_AMOUNT).unwrap()).unwrap();
+        let maximum = Money::non_negative(MAX_AMOUNT).unwrap();
         let one_cent = Money::non_negative(dec!(0.01)).unwrap();
         assert_eq!(
             maximum.checked_add(one_cent).unwrap_err(),
