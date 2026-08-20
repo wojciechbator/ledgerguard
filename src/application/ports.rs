@@ -21,10 +21,8 @@ pub enum RepositoryError {
 
 #[async_trait]
 pub trait AccountingGateway: Send + Sync {
-    async fn fetch_entries(
-        &self,
-        month: Month,
-    ) -> Result<Vec<LedgerEntry>, AccountingGatewayError>;
+    async fn fetch_entries(&self, month: Month)
+    -> Result<Vec<LedgerEntry>, AccountingGatewayError>;
 }
 
 #[async_trait]
