@@ -5,14 +5,23 @@ RUN apk add --no-cache ca-certificates musl-dev
 WORKDIR /app
 
 ARG CARGO_PROFILE=release
-COPY Cargo.toml ./
-COPY migrations ./migrations
-COPY src ./src
 
+# Keep dependency compilation in a normal BuildKit layer so external cache
+# exporters (including GitHub Actions) can reuse it across ephemeral runners.
+COPY Cargo.toml Cargo.lock ./
 RUN --mount=type=cache,id=ledgerguard-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=ledgerguard-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=ledgerguard-target,target=/app/target,sharing=locked \
-    cargo build --profile "${CARGO_PROFILE}" \
+    mkdir -p src \
+    && printf 'pub fn dependency_cache_seed() {}\n' > src/lib.rs \
+    && printf 'fn main() {}\n' > src/main.rs \
+    && cargo build --locked --profile "${CARGO_PROFILE}" \
+    && cargo clean --locked -p ledgerguard \
+    && rm -rf src
+
+COPY src ./src
+RUN --mount=type=cache,id=ledgerguard-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=ledgerguard-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo build --locked --profile "${CARGO_PROFILE}" \
     && cp "target/${CARGO_PROFILE}/ledgerguard" /ledgerguard
 
 FROM scratch AS runtime
