@@ -57,7 +57,11 @@ async fn main() -> Result<()> {
     };
     let app = router(
         state,
-        config.runtime.api_token.as_ref().map(|token| token.expose()),
+        config
+            .runtime
+            .api_token
+            .as_ref()
+            .map(|token| token.expose()),
         config.runtime.auth_disabled,
     )
     .layer(TraceLayer::new_for_http());
