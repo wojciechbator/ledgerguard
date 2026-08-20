@@ -40,10 +40,9 @@ impl SourceSystem {
         if value.len() > 32 {
             return Err(SourceSystemError::TooLong);
         }
-        if !value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-')
-        {
+        if !value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
+        }) {
             return Err(SourceSystemError::InvalidCharacter);
         }
         Ok(Self(value))

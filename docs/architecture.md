@@ -21,7 +21,7 @@ The selected accounting platform and the accountant remain the accounting source
 
 The default provider is SaldeoSMART. Fakturownia, inFakt and wFirma use the same port. A new adapter should require provider registration, typed configuration, an infrastructure implementation and fixture tests — not a new planner/domain branch.
 
-Provider provenance is stored as a validated lowercase slug (`SourceSystem`) rather than a closed enum. This prevents a new vendor from forcing a domain/database schema redesign.
+Provider provenance is stored as a validated lowercase slug (`SourceSystem`) rather than a closed enum. This prevents a new vendor from forcing a domain/database schema redesign. Adapters return provider-neutral `AccountingRecord` values; the application layer owns internal UUIDs and attaches the selected provider as provenance, so an adapter cannot spoof another source.
 
 ## Sync invariants
 
@@ -29,10 +29,9 @@ A fetched batch is rejected before persistence when:
 
 1. an external ID is empty or unreasonably large;
 2. the same external ID occurs twice in one provider batch;
-3. an entry falls outside the requested month;
-4. an entry claims provenance different from the selected provider.
+3. a record falls outside the requested month.
 
-Persistence is idempotent on `(source, external_id)` so provider corrections update normalized data instead of duplicating it.
+After validation, the application assigns internal identity and provider provenance. Persistence is idempotent on `(source, external_id)` so provider corrections update normalized data instead of duplicating it.
 
 ## Safe-to-spend invariant
 
@@ -53,7 +52,7 @@ available cash
 
 Negative headroom is preserved for diagnostics; `safe_to_spend` saturates at zero.
 
-`Money` rejects negative values at construction and during deserialization, so HTTP input cannot bypass this invariant.
+`Money` rejects negative values at construction and during deserialization. The HTTP contract accepts monetary values only as decimal strings and returns decimal strings, avoiding binary floating-point ambiguity at the transport boundary.
 
 ## SaldeoSMART first-live contract
 
@@ -70,4 +69,4 @@ No provider credential belongs in Git or PostgreSQL.
 
 ## Runtime boundary
 
-The first deployment target is a private home server. Compose binds HTTP to loopback, the app runs non-root with a read-only root filesystem, drops Linux capabilities and enables `no-new-privileges`. Public exposure should happen only behind an explicit authenticated reverse-proxy/Tailscale boundary.
+The first deployment target is a private home server. A direct binary binds to loopback by default. Compose binds the container internally to all interfaces but publishes HTTP to host loopback only; the app container runs non-root with a read-only root filesystem, drops Linux capabilities and enables `no-new-privileges`. Public exposure should happen only behind an explicit authenticated reverse-proxy/Tailscale boundary.

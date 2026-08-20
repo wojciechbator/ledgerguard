@@ -69,8 +69,8 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let bind_addr =
-            env::var("LEDGERGUARD_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_owned());
+        let bind_addr = env::var("LEDGERGUARD_BIND_ADDR")
+            .unwrap_or_else(|_| "127.0.0.1:8080".to_owned());
         let bind_addr = SocketAddr::from_str(&bind_addr)
             .with_context(|| format!("invalid LEDGERGUARD_BIND_ADDR: {bind_addr}"))?;
 

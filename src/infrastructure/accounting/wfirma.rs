@@ -59,7 +59,9 @@ impl AccountingSource for WfirmaAdapter {
 
         Err(AccountingSourceError::NotEnabled {
             provider: AccountingProvider::Wfirma,
-            reason: "API-key and OAuth2 auth are documented; read normalization awaits account fixtures".to_owned(),
+            reason:
+                "API-key and OAuth2 auth are documented; read normalization awaits account fixtures"
+                    .to_owned(),
         })
     }
 }

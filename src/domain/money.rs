@@ -1,4 +1,7 @@
-use std::{ops::{Add, AddAssign}, str::FromStr};
+use std::{
+    ops::{Add, AddAssign},
+    str::FromStr,
+};
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -86,6 +89,9 @@ mod tests {
     #[test]
     fn deserialization_preserves_non_negative_invariant() {
         let result = serde_json::from_str::<Money>(r#""-0.01""#);
-        assert_eq!(result.unwrap_err().to_string(), "money amount must not be negative");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "money amount must not be negative"
+        );
     }
 }
