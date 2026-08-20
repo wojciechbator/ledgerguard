@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -13,6 +13,8 @@ use crate::{
     application::{AccountingSource, ProviderDescriptor},
     domain::{Money, Planner, PlannerInput, PlannerPolicy, PlannerResult},
 };
+
+const MAX_JSON_BODY_BYTES: usize = 64 * 1024;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -50,6 +52,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/accounting/provider", get(accounting_provider))
         .route("/v1/planner/evaluate", post(evaluate))
         .route("/v1/planner/simulate", post(simulate))
+        .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
         .with_state(state)
 }
 
