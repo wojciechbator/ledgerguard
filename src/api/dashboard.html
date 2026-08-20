@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'">
+  <title>LedgerGuard</title>
+  <style>
+    :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #f5f7fb; background: #0b0d12; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #181c28 0, #0b0d12 42%); }
+    main { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0 64px; }
+    header { display: flex; gap: 18px; align-items: flex-end; justify-content: space-between; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: clamp(30px, 5vw, 48px); letter-spacing: -0.04em; }
+    h2 { margin: 0 0 16px; font-size: 17px; }
+    p { color: #9ca4b7; line-height: 1.55; }
+    .eyebrow { color: #8b93a7; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 7px; }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+    .card { grid-column: span 12; background: rgba(20, 23, 32, .88); border: 1px solid #262b39; border-radius: 18px; padding: 20px; box-shadow: 0 16px 45px rgba(0,0,0,.2); }
+    .status { grid-column: span 4; min-height: 128px; }
+    .planner { grid-column: span 8; }
+    .side { grid-column: span 4; }
+    .label { color: #8e97aa; font-size: 12px; margin-bottom: 7px; }
+    .big { font-size: 28px; font-weight: 720; letter-spacing: -.03em; }
+    .muted { color: #8e97aa; }
+    .ok { color: #74e0a8; }
+    .warn { color: #ffc766; }
+    .bad { color: #ff7d86; }
+    .fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+    label { display: block; color: #aab2c4; font-size: 12px; }
+    input, button { width: 100%; border-radius: 11px; border: 1px solid #303747; background: #10131a; color: #f5f7fb; padding: 11px 12px; font: inherit; }
+    input { margin-top: 6px; }
+    input:focus { outline: 2px solid #6673ff; outline-offset: 1px; }
+    button { cursor: pointer; background: #edf0ff; color: #10121a; font-weight: 700; border: 0; }
+    button.secondary { background: #1b2030; color: #e6e9f2; border: 1px solid #303747; }
+    button:disabled { opacity: .5; cursor: wait; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .result { margin-top: 16px; border-top: 1px solid #292f3d; padding-top: 16px; display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+    .pill { display: inline-flex; align-items: center; border: 1px solid #303747; border-radius: 999px; padding: 7px 10px; color: #aeb6c8; font-size: 12px; }
+    .token-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+    .token-row button { width: auto; white-space: nowrap; }
+    .notice { min-height: 21px; margin-top: 10px; font-size: 12px; color: #9ca4b7; }
+    code { color: #cdd3e2; }
+    footer { margin-top: 22px; color: #70798c; font-size: 12px; }
+    @media (max-width: 820px) { .status, .planner, .side { grid-column: span 12; } header { align-items: flex-start; flex-direction: column; } }
+    @media (max-width: 560px) { main { width: min(100% - 20px, 1080px); padding-top: 24px; } .fields, .result, .actions { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="eyebrow">Cash flow control</div>
+      <h1>LedgerGuard</h1>
+      <p style="margin:8px 0 0">Jedna liczba, która ma znaczenie: ile możesz bezpiecznie wydać.</p>
+    </div>
+    <span class="pill" id="connection">API: niepołączone</span>
+  </header>
+
+  <section class="grid">
+    <article class="card status">
+      <div class="label">Provider</div>
+      <div class="big" id="provider">—</div>
+      <div class="notice" id="provider-detail">Wpisz token API poniżej.</div>
+    </article>
+    <article class="card status">
+      <div class="label">Live sync</div>
+      <div class="big" id="sync-state">—</div>
+      <div class="notice" id="sync-detail">—</div>
+    </article>
+    <article class="card status">
+      <div class="label">Wersja</div>
+      <div class="big" id="version">—</div>
+      <div class="notice">lokalny serwis LedgerGuard</div>
+    </article>
+
+    <article class="card planner">
+      <h2>Safe-to-spend</h2>
+      <div class="fields">
+        <label>Gotówka dostępna teraz <input id="available_cash" inputmode="decimal" value="0"></label>
+        <label>Koszty już zobowiązane <input id="committed_costs" inputmode="decimal" value="0"></label>
+        <label>Rezerwa PIT / podatek <input id="tax_reserve" inputmode="decimal" value="0"></label>
+        <label>Rezerwa VAT <input id="vat_reserve" inputmode="decimal" value="0"></label>
+        <label>ZUS / zdrowotna <input id="zus_reserve" inputmode="decimal" value="0"></label>
+        <label>Minimalny bufor gotówki <input id="minimum_cash_buffer" inputmode="decimal" value="0"></label>
+        <label>Planowane wydatki <input id="planned_spend" inputmode="decimal" value="0"></label>
+        <label>Próg „ciasno” <input id="tight_threshold" inputmode="decimal" value="2000"></label>
+      </div>
+      <div class="actions">
+        <button id="evaluate">Policz teraz</button>
+        <button id="remember" class="secondary">Zapamiętaj wartości w tej przeglądarce</button>
+      </div>
+      <div class="result">
+        <div><div class="label">Możesz wydać</div><div class="big" id="safe">—</div></div>
+        <div><div class="label">Headroom</div><div class="big" id="headroom">—</div></div>
+        <div><div class="label">Decyzja</div><div class="big" id="decision">—</div></div>
+      </div>
+      <div class="notice" id="planner-note"></div>
+    </article>
+
+    <aside class="card side">
+      <h2>Zakup testowy</h2>
+      <label>Kwota brutto <input id="purchase" inputmode="decimal" value="0"></label>
+      <button id="simulate" style="margin-top:12px">Czy mogę to kupić?</button>
+      <div class="notice" id="purchase-result">—</div>
+      <hr style="border:0;border-top:1px solid #292f3d;margin:20px 0">
+      <h2>Połączenie</h2>
+      <div class="token-row">
+        <label>Bearer token <input id="token" type="password" autocomplete="off" placeholder="LEDGERGUARD_API_TOKEN"></label>
+        <button id="connect" class="secondary">Połącz</button>
+      </div>
+      <div class="notice">Token trafia wyłącznie do <code>sessionStorage</code> tej karty i nie jest wysyłany nigdzie poza tym serwisem.</div>
+      <button id="sync" class="secondary" style="margin-top:12px">Synchronizuj bieżący miesiąc</button>
+      <div class="notice" id="sync-result"></div>
+    </aside>
+  </section>
+  <footer>Accounting facts pozostają po stronie systemu księgowego. LedgerGuard pokazuje plan i bufor, nie zastępuje księgowości.</footer>
+</main>
+<script>
+(() => {
+  const ids = ["available_cash","committed_costs","tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer","planned_spend","tight_threshold"];
+  const $ = id => document.getElementById(id);
+  const tokenInput = $("token");
+  tokenInput.value = sessionStorage.getItem("ledgerguard_token") || "";
+
+  const remembered = JSON.parse(localStorage.getItem("ledgerguard_planner") || "null");
+  if (remembered) ids.forEach(id => { if (remembered[id] !== undefined) $(id).value = remembered[id]; });
+
+  const money = id => {
+    const value = $(id).value.trim().replace(",", ".");
+    return value === "" ? "0" : value;
+  };
+  const input = () => ({
+    available_cash: money("available_cash"), committed_costs: money("committed_costs"), tax_reserve: money("tax_reserve"),
+    vat_reserve: money("vat_reserve"), zus_reserve: money("zus_reserve"), minimum_cash_buffer: money("minimum_cash_buffer"), planned_spend: money("planned_spend")
+  });
+  const headers = () => {
+    const h = {"content-type":"application/json"};
+    const token = tokenInput.value.trim();
+    if (token) h.authorization = `Bearer ${token}`;
+    return h;
+  };
+  async function api(path, options = {}) {
+    const response = await fetch(path, {...options, headers: {...headers(), ...(options.headers || {})}});
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.message || `${response.status} ${response.statusText}`);
+    return body;
+  }
+  const format = value => `${value} zł`;
+  const decisionClass = value => value === "healthy" ? "ok" : value === "tight" ? "warn" : "bad";
+
+  async function status() {
+    try {
+      const s = await api("/v1/system/status");
+      $("connection").textContent = "API: połączone";
+      $("connection").className = "pill ok";
+      $("provider").textContent = s.provider.provider;
+      $("provider-detail").textContent = s.provider.configured ? "credentiale obecne" : "czeka na credentiale";
+      $("sync-state").textContent = s.live_sync_ready ? "READY" : "OFF";
+      $("sync-state").className = `big ${s.live_sync_ready ? "ok" : "warn"}`;
+      $("sync-detail").textContent = s.live_sync_requested ? "deployment prosi o live sync" : "kill-switch wyłączony";
+      $("version").textContent = s.version;
+    } catch (e) {
+      $("connection").textContent = "API: wymaga tokenu";
+      $("connection").className = "pill warn";
+      $("provider-detail").textContent = e.message;
+    }
+  }
+  async function evaluate(path, purchaseGross) {
+    const payload = {input: input(), policy: {tight_threshold: money("tight_threshold")}};
+    if (purchaseGross !== undefined) payload.purchase_gross = purchaseGross;
+    return api(path, {method:"POST", body:JSON.stringify(payload)});
+  }
+  function renderResult(result) {
+    $("safe").textContent = format(result.safe_to_spend);
+    $("headroom").textContent = format(result.headroom);
+    $("decision").textContent = result.decision.toUpperCase();
+    $("decision").className = `big ${decisionClass(result.decision)}`;
+  }
+
+  $("connect").onclick = async () => { sessionStorage.setItem("ledgerguard_token", tokenInput.value.trim()); await status(); };
+  $("remember").onclick = () => {
+    const values = {}; ids.forEach(id => values[id] = $(id).value);
+    localStorage.setItem("ledgerguard_planner", JSON.stringify(values));
+    $("planner-note").textContent = "Wartości zapisane lokalnie w tej przeglądarce.";
+  };
+  $("evaluate").onclick = async () => {
+    try { const body = await evaluate("/v1/planner/evaluate"); renderResult(body.result); $("planner-note").textContent = ""; }
+    catch (e) { $("planner-note").textContent = e.message; }
+  };
+  $("simulate").onclick = async () => {
+    try {
+      const body = await evaluate("/v1/planner/simulate", money("purchase"));
+      const r = body.result;
+      $("purchase-result").innerHTML = `Po zakupie: <strong class="${decisionClass(r.decision)}">${r.decision.toUpperCase()}</strong><br>safe-to-spend: ${format(r.safe_to_spend)}<br>headroom: ${format(r.headroom)}`;
+    } catch (e) { $("purchase-result").textContent = e.message; }
+  };
+  $("sync").onclick = async () => {
+    const now = new Date();
+    try {
+      const r = await api("/v1/accounting/sync", {method:"POST", body:JSON.stringify({year:now.getFullYear(), month:now.getMonth()+1})});
+      $("sync-result").textContent = `Sync OK: ${r.persisted ?? r.records ?? "gotowe"}`;
+      await status();
+    } catch (e) { $("sync-result").textContent = e.message; }
+  };
+  status();
+})();
+</script>
+</body>
+</html>

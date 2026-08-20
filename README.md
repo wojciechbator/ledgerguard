@@ -8,7 +8,7 @@ Accounting platforms remain the source of truth. LedgerGuard stores a normalized
 
 ## Status
 
-Pre-API hardening. The planner domain, provider-neutral accounting port, PostgreSQL persistence, sync validation, HTTP API, migrations, container deployment and CI gates are present.
+Pre-API hardening. The planner domain, provider-neutral accounting port, PostgreSQL persistence, sync validation, HTTP API, migrations, container deployment, minimal dashboard and CI gates are present.
 
 Four accounting adapter boundaries are wired:
 
@@ -40,6 +40,9 @@ All provider adapters are read-only and fail closed until their real account con
         +-----------+-----------+
         |                       |
  /v1/planner/evaluate   /v1/planner/simulate
+                    |
+                    v
+          embedded dashboard
 ```
 
 Boundaries:
@@ -47,7 +50,7 @@ Boundaries:
 - `src/domain` — pure financial rules, money, periods, ledger concepts and provenance invariants;
 - `src/application` — provider-neutral ports and orchestration/use-cases;
 - `src/infrastructure` — PostgreSQL plus provider-specific adapters/factory;
-- `src/api` — Axum transport and DTO boundary only.
+- `src/api` — Axum transport, DTO boundary and a dependency-free embedded dashboard.
 
 Adding a normal accounting provider does not require changing planner rules. See [`docs/providers.md`](docs/providers.md) and [`docs/architecture.md`](docs/architecture.md).
 
@@ -69,23 +72,39 @@ GET /v1/accounting/provider
 
 It reports the provider, whether required credentials are present, read-only mode and declared capabilities.
 
+## Home-server deploy
+
+The canonical small deployment is Docker Compose on a private host. The deployment helper is idempotent, generates local secrets on first run, keeps Saldeo disabled until credentials are verified, makes a compressed PostgreSQL backup before upgrades when the database is already running, builds the current checkout and waits for the container health check.
+
+```bash
+git clone https://github.com/wojciechbator/ledgerguard.git
+cd ledgerguard
+./scripts/deploy-home.sh
+```
+
+On the first run it creates a mode-`0600` `.env` with random PostgreSQL and LedgerGuard API tokens. **Do not commit that file and do not paste the token into chat.**
+
+The service remains loopback-only by default:
+
+```text
+Dashboard: http://127.0.0.1:8088/
+Health:    http://127.0.0.1:8088/healthz
+Ready:     http://127.0.0.1:8088/readyz
+```
+
+For remote use, expose it only through a private Tailscale/reverse-proxy boundary or an SSH tunnel. The dashboard itself is embedded in the Rust binary — there is no Node/Vite/React build and no CDN or external JavaScript dependency. It stores the bearer token only in browser `sessionStorage`; optional planner input persistence uses local browser storage.
+
+When Saldeo credentials arrive, put them in `.env` on the host only after company scope is verified, then explicitly enable `LEDGERGUARD_LIVE_SYNC_ENABLED=true`.
+
 ## Run locally
 
 ```bash
 cp .env.example .env
-# replace POSTGRES_PASSWORD=change-me before using the stack
+# replace POSTGRES_PASSWORD before using the stack
 docker compose up --build
 ```
 
-Compose binds the HTTP service to loopback only:
-
-```text
-http://127.0.0.1:8088/healthz
-http://127.0.0.1:8088/readyz
-http://127.0.0.1:8088/v1/accounting/provider
-```
-
-A directly-run binary also binds to loopback unless `LEDGERGUARD_BIND_ADDR` is explicitly overridden. The application container runs non-root, read-only, with all Linux capabilities dropped and `no-new-privileges` enabled.
+Compose binds the HTTP service to loopback only. A directly-run binary also binds to loopback unless `LEDGERGUARD_BIND_ADDR` is explicitly overridden. The application container runs non-root, read-only, with all Linux capabilities dropped and `no-new-privileges` enabled.
 
 ## Planner API
 
@@ -93,6 +112,7 @@ Evaluate the current position:
 
 ```bash
 curl -s http://127.0.0.1:8088/v1/planner/evaluate \
+  -H 'authorization: Bearer YOUR_LOCAL_TOKEN' \
   -H 'content-type: application/json' \
   -d '{
     "input": {
@@ -108,10 +128,22 @@ curl -s http://127.0.0.1:8088/v1/planner/evaluate \
   }'
 ```
 
-Simulate an additional purchase by POSTing the same body to `/v1/planner/simulate` with:
+Simulate a purchase by adding `purchase_gross` to the same request shape and POSTing it to `/v1/planner/simulate`:
 
 ```json
-{ "purchase_gross": "8900" }
+{
+  "input": {
+    "available_cash": "30000",
+    "committed_costs": "2000",
+    "tax_reserve": "4000",
+    "vat_reserve": "3000",
+    "zus_reserve": "2000",
+    "minimum_cash_buffer": "10000",
+    "planned_spend": "1000"
+  },
+  "policy": { "tight_threshold": "2000" },
+  "purchase_gross": "8900"
+}
 ```
 
 Money is represented with decimal arithmetic and transported as decimal strings, never binary floating point. Negative money values cannot be introduced through JSON deserialization.
@@ -126,9 +158,9 @@ Persistence uses `(source, external_id)` as the idempotency key. A corrected pro
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-cargo build --release
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo build --locked --release
 ```
 
 CI additionally runs the real PostgreSQL repository contract against PostgreSQL 16, validates Compose and builds the runtime image. Third-party GitHub Actions are pinned to immutable commit SHAs.
