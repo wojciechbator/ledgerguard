@@ -25,6 +25,10 @@ impl WfirmaAdapter {
             && self.settings.secret_key.is_some()
             && self.settings.app_key.is_some()
     }
+
+    fn scope_configured(&self) -> bool {
+        self.settings.company_id.is_some()
+    }
 }
 
 #[async_trait]
@@ -34,6 +38,7 @@ impl AccountingSource for WfirmaAdapter {
             provider: AccountingProvider::Wfirma,
             display_name: "wFirma",
             configured: self.configured(),
+            scope_configured: self.scope_configured(),
             read_only: true,
             sync_enabled: false,
             capabilities: ProviderCapabilities {
@@ -57,12 +62,16 @@ impl AccountingSource for WfirmaAdapter {
                 missing: "WFIRMA_ACCESS_KEY, WFIRMA_SECRET_KEY and/or WFIRMA_APP_KEY".to_owned(),
             });
         }
+        if !self.scope_configured() {
+            return Err(AccountingSourceError::ScopeNotConfigured {
+                provider: AccountingProvider::Wfirma,
+                missing: "WFIRMA_COMPANY_ID".to_owned(),
+            });
+        }
 
         Err(AccountingSourceError::NotEnabled {
             provider: AccountingProvider::Wfirma,
-            reason:
-                "API-key and OAuth2 auth are documented; read normalization awaits account fixtures"
-                    .to_owned(),
+            reason: "API-key and OAuth2 auth are documented; read normalization awaits verified company scope and redacted fixtures".to_owned(),
         })
     }
 }

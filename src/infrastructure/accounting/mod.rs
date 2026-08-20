@@ -1,6 +1,7 @@
 mod fakturownia;
 mod infakt;
 mod saldeo;
+mod saldeo_protocol;
 mod wfirma;
 
 use std::sync::Arc;
