@@ -1,5 +1,5 @@
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use super::Money;
 
@@ -30,9 +30,10 @@ pub struct PlannerInput {
     pub planned_spend: Money,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct PlannerResult {
     /// Signed amount after obligations and buffers. Negative means deficit.
+    #[serde(serialize_with = "serialize_decimal_string")]
     pub headroom: Decimal,
     /// Amount that can be spent without crossing the configured floor.
     pub safe_to_spend: Money,
@@ -45,15 +46,33 @@ pub struct Planner;
 impl Planner {
     #[must_use]
     pub fn evaluate(input: PlannerInput, policy: PlannerPolicy) -> PlannerResult {
+        Self::evaluate_with_extra_spend(input, policy, Decimal::ZERO)
+    }
+
+    #[must_use]
+    pub fn simulate_purchase(
+        input: PlannerInput,
+        policy: PlannerPolicy,
+        purchase_gross: Money,
+    ) -> PlannerResult {
+        Self::evaluate_with_extra_spend(input, policy, purchase_gross.amount())
+    }
+
+    fn evaluate_with_extra_spend(
+        input: PlannerInput,
+        policy: PlannerPolicy,
+        extra_spend: Decimal,
+    ) -> PlannerResult {
         let deductions = input.committed_costs.amount()
             + input.tax_reserve.amount()
             + input.vat_reserve.amount()
             + input.zus_reserve.amount()
             + input.minimum_cash_buffer.amount()
-            + input.planned_spend.amount();
+            + input.planned_spend.amount()
+            + extra_spend;
         let headroom = input.available_cash.amount() - deductions;
         let safe_to_spend = Money::non_negative(headroom.max(Decimal::ZERO))
-            .expect("max with zero is always non-negative");
+            .expect("headroom cannot exceed the validated available-cash bound");
 
         let decision = if headroom <= Decimal::ZERO {
             Decision::Blocked
@@ -69,20 +88,19 @@ impl Planner {
             decision,
         }
     }
+}
 
-    #[must_use]
-    pub fn simulate_purchase(
-        mut input: PlannerInput,
-        policy: PlannerPolicy,
-        purchase_gross: Money,
-    ) -> PlannerResult {
-        input.planned_spend += purchase_gross;
-        Self::evaluate(input, policy)
-    }
+fn serialize_decimal_string<S>(value: &Decimal, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.to_string())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
 
@@ -134,5 +152,50 @@ mod tests {
         assert_eq!(result.headroom, dec!(-1_000));
         assert_eq!(result.safe_to_spend.amount(), Decimal::ZERO);
         assert_eq!(result.decision, Decision::Blocked);
+    }
+
+    #[test]
+    fn very_large_purchase_does_not_mutate_money_outside_its_range() {
+        let input = PlannerInput {
+            available_cash: money(dec!(1)),
+            committed_costs: Money::zero(),
+            tax_reserve: Money::zero(),
+            vat_reserve: Money::zero(),
+            zus_reserve: Money::zero(),
+            minimum_cash_buffer: Money::zero(),
+            planned_spend: money(Decimal::from_str("999999999999999999.99").unwrap()),
+        };
+        let result = Planner::simulate_purchase(
+            input,
+            PlannerPolicy {
+                tight_threshold: Money::zero(),
+            },
+            money(dec!(0.01)),
+        );
+
+        assert_eq!(result.decision, Decision::Blocked);
+        assert_eq!(result.safe_to_spend, Money::zero());
+    }
+
+    #[test]
+    fn planner_result_serializes_all_amounts_as_decimal_strings() {
+        let result = Planner::evaluate(
+            PlannerInput {
+                available_cash: money(dec!(10)),
+                committed_costs: Money::zero(),
+                tax_reserve: Money::zero(),
+                vat_reserve: Money::zero(),
+                zus_reserve: Money::zero(),
+                minimum_cash_buffer: Money::zero(),
+                planned_spend: Money::zero(),
+            },
+            PlannerPolicy {
+                tight_threshold: Money::zero(),
+            },
+        );
+
+        let json = serde_json::to_value(result).unwrap();
+        assert_eq!(json["headroom"], "10");
+        assert_eq!(json["safe_to_spend"], "10");
     }
 }

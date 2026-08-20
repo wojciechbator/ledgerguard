@@ -1,3 +1,10 @@
+mod accounting;
 mod ports;
+mod sync;
 
-pub use ports::{AccountingGateway, AccountingGatewayError, LedgerRepository, RepositoryError};
+pub use accounting::{
+    AccountingProvider, AccountingRecord, AccountingSource, AccountingSourceError,
+    ParseAccountingProviderError, ProviderCapabilities, ProviderDescriptor,
+};
+pub use ports::{LedgerRepository, RepositoryError};
+pub use sync::{SyncError, SyncReport, sync_month};

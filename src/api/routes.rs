@@ -1,17 +1,25 @@
+use std::sync::Arc;
+
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::StatusCode,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-use crate::domain::{Money, Planner, PlannerInput, PlannerPolicy, PlannerResult};
+use crate::{
+    application::{AccountingSource, ProviderDescriptor},
+    domain::{Money, Planner, PlannerInput, PlannerPolicy, PlannerResult},
+};
 
-#[derive(Debug, Clone)]
+const MAX_JSON_BODY_BYTES: usize = 64 * 1024;
+
+#[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
+    pub accounting: Arc<dyn AccountingSource>,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,8 +49,10 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(health))
         .route("/readyz", get(ready))
+        .route("/v1/accounting/provider", get(accounting_provider))
         .route("/v1/planner/evaluate", post(evaluate))
         .route("/v1/planner/simulate", post(simulate))
+        .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
         .with_state(state)
 }
 
@@ -56,6 +66,10 @@ async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, St
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     Ok(Json(HealthResponse { status: "ready" }))
+}
+
+async fn accounting_provider(State(state): State<AppState>) -> Json<ProviderDescriptor> {
+    Json(state.accounting.descriptor())
 }
 
 async fn evaluate(Json(request): Json<EvaluateRequest>) -> Json<PlannerResponse> {
