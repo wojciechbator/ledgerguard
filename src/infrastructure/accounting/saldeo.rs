@@ -221,6 +221,10 @@ mod tests {
             api_token: None,
             company_program_id: None,
         };
-        assert!(SaldeoAdapter::new(partial).validate_configuration().is_err());
+        assert!(
+            SaldeoAdapter::new(partial)
+                .validate_configuration()
+                .is_err()
+        );
     }
 }
