@@ -148,19 +148,13 @@ pub fn router(state: AppState, api_token: Option<&str>, auth_disabled: bool) -> 
         .with_state(state)
 }
 
-async fn bearer_auth(
-    State(expected): State<Arc<str>>,
-    request: Request,
-    next: Next,
-) -> Response {
+async fn bearer_auth(State(expected): State<Arc<str>>, request: Request, next: Next) -> Response {
     let authorized = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
-        .is_some_and(|provided| {
-            bool::from(provided.as_bytes().ct_eq(expected.as_bytes()))
-        });
+        .is_some_and(|provided| bool::from(provided.as_bytes().ct_eq(expected.as_bytes())));
 
     if authorized {
         next.run(request).await
