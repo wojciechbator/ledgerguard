@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: ledgerguard
       POSTGRES_USER: ledgerguard
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledgerguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - ledgerguard-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -13,19 +13,39 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    security_opt:
+      - no-new-privileges:true
 
   app:
     build: .
     restart: unless-stopped
+    init: true
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://ledgerguard:${POSTGRES_PASSWORD:-ledgerguard}@postgres:5432/ledgerguard
+      DATABASE_URL: postgres://ledgerguard:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/ledgerguard
       LEDGERGUARD_BIND_ADDR: 0.0.0.0:8080
+      LEDGERGUARD_ACCOUNTING_PROVIDER: ${LEDGERGUARD_ACCOUNTING_PROVIDER:-saldeo}
       RUST_LOG: ${RUST_LOG:-ledgerguard=info,tower_http=info}
+      SALDEO_USERNAME: ${SALDEO_USERNAME:-}
+      SALDEO_API_TOKEN: ${SALDEO_API_TOKEN:-}
+      FAKTUROWNIA_ACCOUNT_DOMAIN: ${FAKTUROWNIA_ACCOUNT_DOMAIN:-}
+      FAKTUROWNIA_API_TOKEN: ${FAKTUROWNIA_API_TOKEN:-}
+      INFAKT_API_KEY: ${INFAKT_API_KEY:-}
+      WFIRMA_ACCESS_KEY: ${WFIRMA_ACCESS_KEY:-}
+      WFIRMA_SECRET_KEY: ${WFIRMA_SECRET_KEY:-}
+      WFIRMA_APP_KEY: ${WFIRMA_APP_KEY:-}
     ports:
       - "127.0.0.1:${LEDGERGUARD_PORT:-8088}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 10s
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
       interval: 10s

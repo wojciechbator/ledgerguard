@@ -15,6 +15,9 @@ pub enum EntryKind {
 #[serde(rename_all = "snake_case")]
 pub enum SourceSystem {
     Saldeo,
+    Fakturownia,
+    Infakt,
+    Wfirma,
     Manual,
 }
 
