@@ -1,7 +1,7 @@
-use std::ops::{Add, AddAssign};
+use std::{ops::{Add, AddAssign}, str::FromStr};
 
 use rust_decimal::Decimal;
-use serde::{Deserialize, Deserializer, Serialize, de};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -14,8 +14,8 @@ pub enum MoneyError {
 ///
 /// LedgerGuard v0.1 intentionally models one accounting currency. Currency
 /// conversion belongs at the integration boundary, not inside the planner.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-#[serde(transparent)]
+/// JSON uses decimal strings exclusively to make the precision contract explicit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Money(Decimal);
 
 impl Money {
@@ -35,12 +35,22 @@ impl Money {
     }
 }
 
+impl Serialize for Money {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
 impl<'de> Deserialize<'de> for Money {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let amount = Decimal::deserialize(deserializer)?;
+        let raw = String::deserialize(deserializer)?;
+        let amount = Decimal::from_str(&raw).map_err(de::Error::custom)?;
         Self::non_negative(amount).map_err(de::Error::custom)
     }
 }
@@ -61,7 +71,17 @@ impl AddAssign for Money {
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal_macros::dec;
+
     use super::*;
+
+    #[test]
+    fn json_contract_is_decimal_string_only() {
+        let money = Money::non_negative(dec!(123.45)).unwrap();
+        assert_eq!(serde_json::to_string(&money).unwrap(), r#""123.45""#);
+        assert_eq!(serde_json::from_str::<Money>(r#""123.45""#).unwrap(), money);
+        assert!(serde_json::from_str::<Money>("123.45").is_err());
+    }
 
     #[test]
     fn deserialization_preserves_non_negative_invariant() {

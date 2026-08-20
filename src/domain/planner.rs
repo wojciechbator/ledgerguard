@@ -1,5 +1,5 @@
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use super::Money;
 
@@ -30,9 +30,10 @@ pub struct PlannerInput {
     pub planned_spend: Money,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct PlannerResult {
     /// Signed amount after obligations and buffers. Negative means deficit.
+    #[serde(serialize_with = "serialize_decimal_string")]
     pub headroom: Decimal,
     /// Amount that can be spent without crossing the configured floor.
     pub safe_to_spend: Money,
@@ -79,6 +80,13 @@ impl Planner {
         input.planned_spend += purchase_gross;
         Self::evaluate(input, policy)
     }
+}
+
+fn serialize_decimal_string<S>(value: &Decimal, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.to_string())
 }
 
 #[cfg(test)]
@@ -134,5 +142,27 @@ mod tests {
         assert_eq!(result.headroom, dec!(-1_000));
         assert_eq!(result.safe_to_spend.amount(), Decimal::ZERO);
         assert_eq!(result.decision, Decision::Blocked);
+    }
+
+    #[test]
+    fn planner_result_serializes_all_amounts_as_decimal_strings() {
+        let result = Planner::evaluate(
+            PlannerInput {
+                available_cash: money(dec!(10)),
+                committed_costs: Money::zero(),
+                tax_reserve: Money::zero(),
+                vat_reserve: Money::zero(),
+                zus_reserve: Money::zero(),
+                minimum_cash_buffer: Money::zero(),
+                planned_spend: Money::zero(),
+            },
+            PlannerPolicy {
+                tight_threshold: Money::zero(),
+            },
+        );
+
+        let json = serde_json::to_value(result).unwrap();
+        assert_eq!(json["headroom"], "10");
+        assert_eq!(json["safe_to_spend"], "10");
     }
 }
