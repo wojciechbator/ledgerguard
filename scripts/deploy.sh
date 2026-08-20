@@ -38,6 +38,7 @@ REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 printf '==> Waiting for CI for %s\n' "$TARGET"
 deadline=$((SECONDS + WAIT_SECONDS))
 run_id=""
+last_notice=0
 while (( SECONDS < deadline )); do
   run_id="$(gh run list --repo "$REPO" --workflow "CI" --branch main --commit "$TARGET" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)"
   if [[ -n "$run_id" ]]; then
@@ -45,6 +46,10 @@ while (( SECONDS < deadline )); do
     gh run watch "$run_id" --repo "$REPO" --exit-status
     printf 'CI=PASS sha=%s\n' "$TARGET"
     break
+  fi
+  if (( SECONDS - last_notice >= 15 )); then
+    printf '... still waiting for CI run for %s\n' "$TARGET"
+    last_notice=$SECONDS
   fi
   sleep "$POLL_SECONDS"
 done
@@ -55,6 +60,7 @@ done
 REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
 [[ "$REMOTE_MAIN" == "$TARGET" ]] || fail "origin/main moved while waiting: remote=$REMOTE_MAIN target=$TARGET"
 
+printf '==> Deploying exact validated SHA %s to %s\n' "$TARGET" "$REMOTE"
 ssh -T "$REMOTE" bash -s -- "$REMOTE_DIR" "$TARGET" <<'REMOTE_DEPLOY'
 set -Eeuo pipefail
 root="$1"
