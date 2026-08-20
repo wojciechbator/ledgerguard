@@ -19,6 +19,7 @@ use tower_http::{
 };
 use tracing::error;
 
+use super::dashboard::dashboard;
 use crate::{
     application::{
         AccountingSource, LedgerRepository, ProviderDescriptor, SyncError, SyncReport, sync_month,
@@ -126,6 +127,8 @@ pub fn router(state: AppState, api_token: Option<&str>, auth_disabled: bool) -> 
     }
 
     Router::new()
+        .route("/", get(dashboard))
+        .route("/dashboard", get(dashboard))
         .route("/healthz", get(health))
         .route("/readyz", get(ready))
         .nest("/v1", v1)
