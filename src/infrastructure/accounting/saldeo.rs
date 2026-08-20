@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use super::saldeo_protocol::{SaldeoGetRequest, signed_get_request};
+use super::saldeo_protocol::{SaldeoHttpMethod, SaldeoRequest, signed_request};
 use crate::{
     application::{
         AccountingProvider, AccountingRecord, AccountingSource, AccountingSourceError,
@@ -36,9 +36,12 @@ impl SaldeoAdapter {
     /// Builds the first safe live request used after credentials are issued.
     /// `company.list` lets us verify exactly which companies the dedicated user can see
     /// before any document synchronization is allowed.
-    pub fn company_list_probe_request(&self) -> Result<SaldeoGetRequest, AccountingSourceError> {
+    pub(crate) fn company_list_probe_request(
+        &self,
+    ) -> Result<SaldeoRequest, AccountingSourceError> {
         let (username, token) = self.credentials()?;
-        signed_get_request(
+        signed_request(
+            SaldeoHttpMethod::Get,
             COMPANY_LIST_PATH,
             username,
             token,
@@ -51,9 +54,9 @@ impl SaldeoAdapter {
         })
     }
 
-    /// Builds the document-list request with the deliberately conservative `SALDEO` policy.
-    /// Policies such as LAST_10_DAYS can alter export state and therefore are not used by default.
-    pub fn document_list_request(&self) -> Result<SaldeoGetRequest, AccountingSourceError> {
+    /// Saldeo API-XML v2.12 defines `document.list` as POST. The deliberately
+    /// conservative `SALDEO` policy avoids the export-state semantics of LAST_10_DAYS variants.
+    pub(crate) fn document_list_request(&self) -> Result<SaldeoRequest, AccountingSourceError> {
         let (username, token) = self.credentials()?;
         let company_program_id = self.settings.company_program_id.as_deref().ok_or_else(|| {
             AccountingSourceError::ScopeNotConfigured {
@@ -62,7 +65,8 @@ impl SaldeoAdapter {
             }
         })?;
 
-        signed_get_request(
+        signed_request(
+            SaldeoHttpMethod::Post,
             DOCUMENT_LIST_PATH,
             username,
             token,
@@ -160,18 +164,34 @@ mod tests {
     }
 
     #[test]
-    fn document_list_is_hard_wired_to_non_surprising_saldeo_policy() {
+    fn company_probe_uses_the_official_get_operation() {
+        let request = SaldeoAdapter::new(configured_settings())
+            .company_list_probe_request()
+            .unwrap();
+
+        assert_eq!(request.method, SaldeoHttpMethod::Get);
+        assert_eq!(request.path, COMPANY_LIST_PATH);
+    }
+
+    #[test]
+    fn document_list_uses_v2_12_post_and_conservative_saldeo_policy() {
         let request = SaldeoAdapter::new(configured_settings())
             .document_list_request()
             .unwrap();
 
+        assert_eq!(request.method, SaldeoHttpMethod::Post);
         assert_eq!(request.path, DOCUMENT_LIST_PATH);
         assert!(
             request
-                .query
+                .parameters
                 .iter()
                 .any(|(key, value)| key == "policy" && value == "SALDEO")
         );
-        assert!(!request.query.iter().any(|(_, value)| value == "token"));
+        assert!(
+            !request
+                .parameters
+                .iter()
+                .any(|(_, value)| value == "token")
+        );
     }
 }
