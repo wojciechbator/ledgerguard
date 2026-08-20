@@ -14,7 +14,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 rust_decimal = { version = "1.36", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "rust_decimal", "uuid", "migrate"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "rust_decimal", "uuid", "migrate", "macros"] }
 thiserror = "2.0"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal"] }
 tower-http = { version = "0.6", features = ["trace"] }
