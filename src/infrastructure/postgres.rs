@@ -1,11 +1,16 @@
 use async_trait::async_trait;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
 use crate::{
     application::{LedgerRepository, RepositoryError},
     domain::{EntryKind, LedgerEntry, Money, Month, SourceSystem},
 };
+
+// Ten bind parameters are emitted per row. Keeping batches at 5k stays safely
+// below PostgreSQL's 65,535 bind-parameter ceiling while collapsing a 10k sync
+// from 10,000 network round-trips to two statements.
+const UPSERT_ROWS_PER_BATCH: usize = 5_000;
 
 #[derive(Debug, Clone)]
 pub struct PgLedgerRepository {
@@ -22,19 +27,41 @@ impl PgLedgerRepository {
 #[async_trait]
 impl LedgerRepository for PgLedgerRepository {
     async fn upsert_entries(&self, entries: &[LedgerEntry]) -> Result<(), RepositoryError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
         let mut tx = self
             .pool
             .begin()
             .await
             .map_err(|err| RepositoryError::Storage(err.to_string()))?;
 
-        for entry in entries {
-            sqlx::query(
+        for entries in entries.chunks(UPSERT_ROWS_PER_BATCH) {
+            let mut query = QueryBuilder::<Postgres>::new(
                 r#"
                 INSERT INTO ledger_entries (
                     id, external_id, kind, booked_on, gross, net, vat,
                     category, counterparty, source
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                )
+                "#,
+            );
+
+            query.push_values(entries, |mut row, entry| {
+                row.push_bind(entry.id)
+                    .push_bind(&entry.external_id)
+                    .push_bind(kind_to_str(entry.kind))
+                    .push_bind(entry.booked_on)
+                    .push_bind(entry.gross.amount())
+                    .push_bind(entry.net.map(Money::amount))
+                    .push_bind(entry.vat.map(Money::amount))
+                    .push_bind(&entry.category)
+                    .push_bind(&entry.counterparty)
+                    .push_bind(entry.source.as_str());
+            });
+
+            query.push(
+                r#"
                 ON CONFLICT (source, external_id) DO UPDATE SET
                     kind = EXCLUDED.kind,
                     booked_on = EXCLUDED.booked_on,
@@ -44,21 +71,31 @@ impl LedgerRepository for PgLedgerRepository {
                     category = EXCLUDED.category,
                     counterparty = EXCLUDED.counterparty,
                     updated_at = now()
+                WHERE (
+                    ledger_entries.kind,
+                    ledger_entries.booked_on,
+                    ledger_entries.gross,
+                    ledger_entries.net,
+                    ledger_entries.vat,
+                    ledger_entries.category,
+                    ledger_entries.counterparty
+                ) IS DISTINCT FROM (
+                    EXCLUDED.kind,
+                    EXCLUDED.booked_on,
+                    EXCLUDED.gross,
+                    EXCLUDED.net,
+                    EXCLUDED.vat,
+                    EXCLUDED.category,
+                    EXCLUDED.counterparty
+                )
                 "#,
-            )
-            .bind(entry.id)
-            .bind(&entry.external_id)
-            .bind(kind_to_str(entry.kind))
-            .bind(entry.booked_on)
-            .bind(entry.gross.amount())
-            .bind(entry.net.map(Money::amount))
-            .bind(entry.vat.map(Money::amount))
-            .bind(&entry.category)
-            .bind(&entry.counterparty)
-            .bind(entry.source.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| RepositoryError::Storage(err.to_string()))?;
+            );
+
+            query
+                .build()
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| RepositoryError::Storage(err.to_string()))?;
         }
 
         tx.commit()
