@@ -83,7 +83,10 @@ impl ProviderCapabilities {
 pub struct ProviderDescriptor {
     pub provider: AccountingProvider,
     pub display_name: &'static str,
+    /// Required credentials are present. This does not mean the credentials were verified live.
     pub configured: bool,
+    /// A deterministic company/account scope has been configured where the provider requires one.
+    pub scope_configured: bool,
     pub read_only: bool,
     /// True only after the provider's real account contract has been fixture-verified.
     pub sync_enabled: bool,
@@ -111,6 +114,11 @@ pub struct AccountingRecord {
 pub enum AccountingSourceError {
     #[error("{provider} is not configured; missing: {missing}")]
     NotConfigured {
+        provider: AccountingProvider,
+        missing: String,
+    },
+    #[error("{provider} company/account scope is not configured; missing: {missing}")]
+    ScopeNotConfigured {
         provider: AccountingProvider,
         missing: String,
     },
