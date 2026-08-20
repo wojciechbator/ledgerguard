@@ -2,11 +2,11 @@ use async_trait::async_trait;
 
 use crate::{
     application::{
-        AccountingProvider, AccountingSource, AccountingSourceError, ProviderCapabilities,
-        ProviderDescriptor,
+        AccountingProvider, AccountingRecord, AccountingSource, AccountingSourceError,
+        ProviderCapabilities, ProviderDescriptor,
     },
     config::WfirmaSettings,
-    domain::{LedgerEntry, Month},
+    domain::Month,
 };
 
 #[derive(Debug, Clone)]
@@ -46,7 +46,10 @@ impl AccountingSource for WfirmaAdapter {
         }
     }
 
-    async fn fetch_entries(&self, _month: Month) -> Result<Vec<LedgerEntry>, AccountingSourceError> {
+    async fn fetch_records(
+        &self,
+        _month: Month,
+    ) -> Result<Vec<AccountingRecord>, AccountingSourceError> {
         if !self.configured() {
             return Err(AccountingSourceError::NotConfigured {
                 provider: AccountingProvider::Wfirma,
