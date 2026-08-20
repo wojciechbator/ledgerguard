@@ -2,19 +2,20 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{HeaderName, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use subtle::ConstantTimeEq;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     set_header::SetResponseHeaderLayer,
     timeout::TimeoutLayer,
-    validate_request::ValidateRequestHeaderLayer,
 };
 use tracing::error;
 
@@ -118,7 +119,10 @@ pub fn router(state: AppState, api_token: Option<&str>, auth_disabled: bool) -> 
 
     if !auth_disabled {
         let api_token = api_token.expect("configuration validates API token when auth is enabled");
-        v1 = v1.route_layer(ValidateRequestHeaderLayer::bearer(api_token));
+        v1 = v1.route_layer(middleware::from_fn_with_state(
+            Arc::<str>::from(api_token),
+            bearer_auth,
+        ));
     }
 
     Router::new()
@@ -136,9 +140,38 @@ pub fn router(state: AppState, api_token: Option<&str>, auth_disabled: bool) -> 
             HeaderName::from_static("x-content-type-options"),
             HeaderValue::from_static("nosniff"),
         ))
-        .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            REQUEST_TIMEOUT,
+        ))
         .layer(CatchPanicLayer::new())
         .with_state(state)
+}
+
+async fn bearer_auth(
+    State(expected): State<Arc<str>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let authorized = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .is_some_and(|provided| {
+            bool::from(provided.as_bytes().ct_eq(expected.as_bytes()))
+        });
+
+    if authorized {
+        next.run(request).await
+    } else {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "missing or invalid bearer token",
+        )
+        .into_response()
+    }
 }
 
 async fn health() -> Json<HealthResponse> {
