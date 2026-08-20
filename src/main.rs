@@ -19,6 +19,9 @@ async fn main() -> Result<()> {
 
     let config = Config::from_env()?;
     let accounting = build_accounting_source(&config.accounting);
+    accounting
+        .validate_configuration()
+        .context("accounting provider configuration preflight failed")?;
     let provider = accounting.descriptor();
 
     if config.runtime.live_sync_enabled

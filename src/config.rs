@@ -182,9 +182,8 @@ fn validate_runtime_security(
         return Ok(());
     }
 
-    let api_token = api_token.context(
-        "LEDGERGUARD_API_TOKEN is required unless LEDGERGUARD_AUTH_DISABLED=true",
-    )?;
+    let api_token = api_token
+        .context("LEDGERGUARD_API_TOKEN is required unless LEDGERGUARD_AUTH_DISABLED=true")?;
     if api_token.expose().len() < MIN_API_TOKEN_BYTES {
         bail!("LEDGERGUARD_API_TOKEN must contain at least {MIN_API_TOKEN_BYTES} bytes");
     }
@@ -235,9 +234,7 @@ mod tests {
             validate_runtime_security(
                 exposed,
                 false,
-                Some(&SecretString::for_test(
-                    "0123456789abcdef0123456789abcdef"
-                ))
+                Some(&SecretString::for_test("0123456789abcdef0123456789abcdef"))
             )
             .is_ok()
         );

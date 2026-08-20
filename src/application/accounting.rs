@@ -143,6 +143,10 @@ pub enum AccountingSourceError {
 pub trait AccountingSource: Send + Sync {
     fn descriptor(&self) -> ProviderDescriptor;
 
+    fn validate_configuration(&self) -> Result<(), AccountingSourceError> {
+        Ok(())
+    }
+
     async fn fetch_records(
         &self,
         month: Month,
