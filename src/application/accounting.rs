@@ -85,6 +85,8 @@ pub struct ProviderDescriptor {
     pub display_name: &'static str,
     pub configured: bool,
     pub read_only: bool,
+    /// True only after the provider's real account contract has been fixture-verified.
+    pub sync_enabled: bool,
     pub capabilities: ProviderCapabilities,
 }
 

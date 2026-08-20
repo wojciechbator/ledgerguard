@@ -7,10 +7,17 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
 
+const MAX_AMOUNT: &str = "999999999999999999.99";
+const MAX_SCALE: u32 = 2;
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum MoneyError {
     #[error("money amount must not be negative")]
     Negative,
+    #[error("money amount must have at most two fractional digits")]
+    TooPrecise,
+    #[error("money amount exceeds the supported range")]
+    TooLarge,
 }
 
 /// Monetary value in PLN.
@@ -27,8 +34,16 @@ impl Money {
     }
 
     pub fn non_negative(amount: Decimal) -> Result<Self, MoneyError> {
+        let amount = amount.normalize();
         if amount.is_sign_negative() {
             return Err(MoneyError::Negative);
+        }
+        if amount.scale() > MAX_SCALE {
+            return Err(MoneyError::TooPrecise);
+        }
+        let maximum = Decimal::from_str(MAX_AMOUNT).expect("MAX_AMOUNT is a valid decimal");
+        if amount > maximum {
+            return Err(MoneyError::TooLarge);
         }
         Ok(Self(amount))
     }
@@ -93,5 +108,20 @@ mod tests {
             result.unwrap_err().to_string(),
             "money amount must not be negative"
         );
+    }
+
+    #[test]
+    fn rejects_precision_that_postgres_would_round() {
+        assert_eq!(
+            Money::non_negative(dec!(1.001)).unwrap_err(),
+            MoneyError::TooPrecise
+        );
+        assert_eq!(Money::non_negative(dec!(1.230)).unwrap().amount(), dec!(1.23));
+    }
+
+    #[test]
+    fn rejects_values_outside_numeric_20_2_storage_range() {
+        let too_large = Decimal::from_str("1000000000000000000").unwrap();
+        assert_eq!(Money::non_negative(too_large).unwrap_err(), MoneyError::TooLarge);
     }
 }

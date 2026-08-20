@@ -35,6 +35,7 @@ impl AccountingSource for WfirmaAdapter {
             display_name: "wFirma",
             configured: self.configured(),
             read_only: true,
+            sync_enabled: false,
             capabilities: ProviderCapabilities {
                 revenues: true,
                 expenses: true,

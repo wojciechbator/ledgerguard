@@ -11,6 +11,7 @@ use super::{
 use crate::domain::{LedgerEntry, Month, SourceSystem};
 
 const MAX_EXTERNAL_ID_BYTES: usize = 256;
+const MAX_BATCH_ENTRIES: usize = 10_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SyncReport {
@@ -44,14 +45,14 @@ pub async fn sync_month(
         .into_iter()
         .map(|record| LedgerEntry {
             id: Uuid::new_v4(),
-            external_id: record.external_id,
+            external_id: record.external_id.trim().to_owned(),
             kind: record.kind,
             booked_on: record.booked_on,
             gross: record.gross,
             net: record.net,
             vat: record.vat,
-            category: record.category,
-            counterparty: record.counterparty,
+            category: normalize_optional_text(record.category),
+            counterparty: normalize_optional_text(record.counterparty),
             source: provenance.clone(),
         })
         .collect::<Vec<_>>();
@@ -66,8 +67,13 @@ pub async fn sync_month(
 }
 
 fn validate_batch(month: Month, records: &[AccountingRecord]) -> Result<(), SyncError> {
-    let mut external_ids = HashSet::with_capacity(records.len());
+    if records.len() > MAX_BATCH_ENTRIES {
+        return Err(SyncError::InvalidBatch(format!(
+            "batch exceeds {MAX_BATCH_ENTRIES} records"
+        )));
+    }
 
+    let mut external_ids = HashSet::with_capacity(records.len());
     for record in records {
         let external_id = record.external_id.trim();
         if external_id.is_empty() {
@@ -96,6 +102,13 @@ fn validate_batch(month: Month, records: &[AccountingRecord]) -> Result<(), Sync
     Ok(())
 }
 
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let value = value.trim();
+        (!value.is_empty()).then(|| value.to_owned())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -122,6 +135,7 @@ mod tests {
                 display_name: "fake Saldeo",
                 configured: true,
                 read_only: true,
+                sync_enabled: true,
                 capabilities: ProviderCapabilities::invoices_only(),
             }
         }
@@ -170,7 +184,7 @@ mod tests {
     #[tokio::test]
     async fn valid_batch_gets_application_owned_identity_and_provenance() {
         let source = FakeSource {
-            records: vec![record("42", 20)],
+            records: vec![record(" 42 ", 20)],
         };
         let repository = CaptureRepository::default();
         let month = Month::new(2026, 8).unwrap();
@@ -180,14 +194,15 @@ mod tests {
         assert_eq!(report.imported, 1);
         let entries = repository.entries.lock().unwrap();
         assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].external_id, "42");
         assert_eq!(entries[0].source.as_str(), "saldeo");
         assert_ne!(entries[0].id, Uuid::nil());
     }
 
     #[tokio::test]
-    async fn duplicate_external_ids_are_rejected_before_persistence() {
+    async fn duplicate_external_ids_are_rejected_after_canonicalization() {
         let source = FakeSource {
-            records: vec![record("42", 20), record("42", 21)],
+            records: vec![record("42", 20), record(" 42 ", 21)],
         };
         let repository = CaptureRepository::default();
         let month = Month::new(2026, 8).unwrap();
