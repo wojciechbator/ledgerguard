@@ -4,6 +4,8 @@ use anyhow::{Context, Result, bail};
 
 use crate::application::AccountingProvider;
 
+const MIN_API_TOKEN_BYTES: usize = 32;
+
 #[derive(Clone)]
 pub struct SecretString(String);
 
@@ -120,11 +122,7 @@ impl Config {
         let database_url = SecretString::required_from_env_or_file("DATABASE_URL")?;
         let auth_disabled = bool_env("LEDGERGUARD_AUTH_DISABLED", false)?;
         let api_token = SecretString::from_env_or_file("LEDGERGUARD_API_TOKEN")?;
-        if !auth_disabled && api_token.is_none() {
-            bail!(
-                "LEDGERGUARD_API_TOKEN is required unless LEDGERGUARD_AUTH_DISABLED=true; never disable auth on an exposed deployment"
-            );
-        }
+        validate_runtime_security(bind_addr, auth_disabled, api_token.as_ref())?;
 
         let provider = env::var("LEDGERGUARD_ACCOUNTING_PROVIDER")
             .unwrap_or_else(|_| AccountingProvider::default().to_string())
@@ -172,6 +170,27 @@ impl Config {
     }
 }
 
+fn validate_runtime_security(
+    bind_addr: SocketAddr,
+    auth_disabled: bool,
+    api_token: Option<&SecretString>,
+) -> Result<()> {
+    if auth_disabled {
+        if !bind_addr.ip().is_loopback() {
+            bail!("LEDGERGUARD_AUTH_DISABLED=true is allowed only on a loopback bind address");
+        }
+        return Ok(());
+    }
+
+    let api_token = api_token.context(
+        "LEDGERGUARD_API_TOKEN is required unless LEDGERGUARD_AUTH_DISABLED=true",
+    )?;
+    if api_token.expose().len() < MIN_API_TOKEN_BYTES {
+        bail!("LEDGERGUARD_API_TOKEN must contain at least {MIN_API_TOKEN_BYTES} bytes");
+    }
+    Ok(())
+}
+
 fn optional_env(name: &'static str) -> Option<String> {
     env::var(name)
         .ok()
@@ -188,5 +207,39 @@ fn bool_env(name: &'static str, default: bool) -> Result<bool> {
         "1" | "true" | "yes" | "on" => Ok(true),
         "0" | "false" | "no" | "off" => Ok(false),
         _ => bail!("{name} must be one of true/false, 1/0, yes/no, on/off"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unauthenticated_runtime_is_loopback_only() {
+        let loopback = SocketAddr::from_str("127.0.0.1:8080").unwrap();
+        assert!(validate_runtime_security(loopback, true, None).is_ok());
+
+        let exposed = SocketAddr::from_str("0.0.0.0:8080").unwrap();
+        assert!(validate_runtime_security(exposed, true, None).is_err());
+    }
+
+    #[test]
+    fn authenticated_runtime_requires_strong_token() {
+        let exposed = SocketAddr::from_str("0.0.0.0:8080").unwrap();
+        assert!(validate_runtime_security(exposed, false, None).is_err());
+        assert!(
+            validate_runtime_security(exposed, false, Some(&SecretString::for_test("short")))
+                .is_err()
+        );
+        assert!(
+            validate_runtime_security(
+                exposed,
+                false,
+                Some(&SecretString::for_test(
+                    "0123456789abcdef0123456789abcdef"
+                ))
+            )
+            .is_ok()
+        );
     }
 }
