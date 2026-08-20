@@ -24,6 +24,11 @@ impl SecretString {
     pub fn expose(&self) -> &str {
         &self.0
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(value: &str) -> Self {
+        Self(value.to_owned())
+    }
 }
 
 impl fmt::Debug for SecretString {
