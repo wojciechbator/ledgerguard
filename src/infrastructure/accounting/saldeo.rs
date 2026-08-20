@@ -187,11 +187,6 @@ mod tests {
                 .iter()
                 .any(|(key, value)| key == "policy" && value == "SALDEO")
         );
-        assert!(
-            !request
-                .parameters
-                .iter()
-                .any(|(_, value)| value == "token")
-        );
+        assert!(!request.parameters.iter().any(|(_, value)| value == "token"));
     }
 }
