@@ -33,6 +33,7 @@ impl AccountingSource for InfaktAdapter {
             display_name: "inFakt",
             configured: self.configured(),
             read_only: true,
+            sync_enabled: false,
             capabilities: ProviderCapabilities {
                 revenues: true,
                 expenses: true,
