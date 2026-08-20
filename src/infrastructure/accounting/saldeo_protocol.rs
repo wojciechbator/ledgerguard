@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use md5::{Digest, Md5};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,8 +45,10 @@ pub fn signed_request(
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<String>();
     let encoded = saldeo_url_encode(&signature_base);
-    let digest = md5::compute(format!("{encoded}{api_token}"));
-    let req_sig = format!("{digest:x}");
+    let mut signer = Md5::new();
+    signer.update(encoded.as_bytes());
+    signer.update(api_token.as_bytes());
+    let req_sig = format!("{:x}", signer.finalize());
 
     let mut parameters = params.into_iter().collect::<Vec<_>>();
     parameters.push(("req_sig".to_owned(), req_sig));
