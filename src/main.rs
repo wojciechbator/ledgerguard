@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use ledgerguard::{
     api::{AppState, router},
     config::Config,
+    infrastructure::accounting::build_accounting_source,
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
@@ -17,6 +18,9 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let config = Config::from_env()?;
+    let accounting = build_accounting_source(&config.accounting);
+    let provider = accounting.descriptor();
+
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(5))
@@ -29,12 +33,17 @@ async fn main() -> Result<()> {
         .await
         .context("failed to apply database migrations")?;
 
-    let app = router(AppState { pool }).layer(TraceLayer::new_for_http());
+    let app = router(AppState { pool, accounting }).layer(TraceLayer::new_for_http());
 
     let listener = TcpListener::bind(config.bind_addr)
         .await
         .with_context(|| format!("failed to bind {}", config.bind_addr))?;
-    info!(address = %config.bind_addr, "LedgerGuard listening");
+    info!(
+        address = %config.bind_addr,
+        accounting_provider = %provider.provider,
+        accounting_configured = provider.configured,
+        "LedgerGuard listening"
+    );
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

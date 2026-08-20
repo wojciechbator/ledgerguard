@@ -1,3 +1,8 @@
+mod accounting;
 mod ports;
 
-pub use ports::{AccountingGateway, AccountingGatewayError, LedgerRepository, RepositoryError};
+pub use accounting::{
+    AccountingProvider, AccountingSource, AccountingSourceError, ParseAccountingProviderError,
+    ProviderCapabilities, ProviderDescriptor,
+};
+pub use ports::{LedgerRepository, RepositoryError};
