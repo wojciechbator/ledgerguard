@@ -85,7 +85,7 @@ http://127.0.0.1:8088/readyz
 http://127.0.0.1:8088/v1/accounting/provider
 ```
 
-The application container runs non-root, read-only, with all Linux capabilities dropped and `no-new-privileges` enabled.
+A directly-run binary also binds to loopback unless `LEDGERGUARD_BIND_ADDR` is explicitly overridden. The application container runs non-root, read-only, with all Linux capabilities dropped and `no-new-privileges` enabled.
 
 ## Planner API
 
@@ -114,18 +114,13 @@ Simulate an additional purchase by POSTing the same body to `/v1/planner/simulat
 { "purchase_gross": "8900" }
 ```
 
-Money is represented with decimal arithmetic, never binary floating point. Negative money values cannot be introduced through JSON deserialization.
+Money is represented with decimal arithmetic and transported as decimal strings, never binary floating point. Negative money values cannot be introduced through JSON deserialization.
 
 ## Accounting sync contract
 
-Before persistence, every provider batch is checked for:
+Provider adapters return neutral accounting records rather than internal ledger entities. Before persistence, every provider batch is checked for bounded non-empty external IDs, duplicate IDs and strict requested-month boundaries. The application then assigns internal identity and trusted provider provenance.
 
-- provider/source provenance consistency;
-- requested-month boundaries;
-- non-empty bounded external IDs;
-- duplicate external IDs inside one batch.
-
-Persistence then uses `(source, external_id)` as the idempotency key. A corrected provider record updates the normalized row instead of creating a duplicate.
+Persistence uses `(source, external_id)` as the idempotency key. A corrected provider record updates the normalized row instead of creating a duplicate.
 
 ## Development gates
 
@@ -136,11 +131,11 @@ cargo test --all-targets --all-features
 cargo build --release
 ```
 
-CI additionally runs the real PostgreSQL repository contract against PostgreSQL 16, validates Compose and builds the runtime image.
+CI additionally runs the real PostgreSQL repository contract against PostgreSQL 16, validates Compose and builds the runtime image. Third-party GitHub Actions are pinned to immutable commit SHAs.
 
 ## Deployment model
 
-The intended first deployment is a private home-server service behind the existing reverse-proxy/Tailscale boundary. Do not expose financial endpoints directly to the public Internet.
+The intended first deployment is a private home-server service behind an authenticated reverse-proxy/Tailscale boundary. Do not expose financial endpoints directly to the public Internet.
 
 ## Security rules
 

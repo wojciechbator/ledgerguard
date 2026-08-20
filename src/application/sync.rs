@@ -5,8 +5,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::{
-    AccountingProvider, AccountingRecord, AccountingSource, AccountingSourceError, LedgerRepository,
-    RepositoryError,
+    AccountingProvider, AccountingRecord, AccountingSource, AccountingSourceError,
+    LedgerRepository, RepositoryError,
 };
 use crate::domain::{LedgerEntry, Month, SourceSystem};
 
