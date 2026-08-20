@@ -32,6 +32,9 @@ impl AccountingSource for InfaktAdapter {
             provider: AccountingProvider::Infakt,
             display_name: "inFakt",
             configured: self.configured(),
+            // inFakt API keys/scopes are issued for the authenticated account; we still
+            // verify the effective company identity before enabling live normalization.
+            scope_configured: self.configured(),
             read_only: true,
             sync_enabled: false,
             capabilities: ProviderCapabilities {
@@ -58,7 +61,7 @@ impl AccountingSource for InfaktAdapter {
 
         Err(AccountingSourceError::NotEnabled {
             provider: AccountingProvider::Infakt,
-            reason: "API v3 read scopes are modeled; normalization awaits redacted invoice/cost fixtures".to_owned(),
+            reason: "API v3 read scopes are modeled; normalization awaits a verified account identity and redacted invoice/cost fixtures".to_owned(),
         })
     }
 }

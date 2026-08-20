@@ -2,7 +2,7 @@
 name = "ledgerguard"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 description = "Cash flow and cost planning service for small businesses"
 publish = false
 
@@ -12,12 +12,14 @@ async-trait = "0.1"
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
+md5 = "0.7"
 rust_decimal = { version = "1.36", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "rust_decimal", "uuid", "migrate", "macros"] }
+subtle = "2.6"
 thiserror = "2.0"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal"] }
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.6", features = ["catch-panic", "request-id", "set-header", "timeout", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
