@@ -28,7 +28,9 @@ services:
         max-file: "3"
 
   app:
-    build: .
+    build:
+      context: .
+      target: runtime
     restart: unless-stopped
     init: true
     depends_on:
@@ -41,7 +43,7 @@ services:
       LEDGERGUARD_API_TOKEN: ${LEDGERGUARD_API_TOKEN:-}
       LEDGERGUARD_AUTH_DISABLED: "false"
       LEDGERGUARD_LIVE_SYNC_ENABLED: ${LEDGERGUARD_LIVE_SYNC_ENABLED:-false}
-      RUST_LOG: ${RUST_LOG:-ledgerguard=info,tower_http=info}
+      RUST_LOG: ${RUST_LOG:-info}
       SALDEO_BASE_URL: ${SALDEO_BASE_URL:-https://saldeo.brainshare.pl}
       SALDEO_USERNAME: ${SALDEO_USERNAME:-}
       SALDEO_API_TOKEN: ${SALDEO_API_TOKEN:-}
@@ -70,7 +72,7 @@ services:
     mem_limit: 256m
     stop_grace_period: 10s
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      test: ["CMD", "/ledgerguard", "healthcheck"]
       interval: 10s
       timeout: 3s
       retries: 5
