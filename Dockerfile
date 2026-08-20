@@ -1,14 +1,36 @@
-FROM rust:1.89-bookworm AS builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release
+# syntax=docker/dockerfile:1.7
 
-FROM debian:bookworm-slim AS runtime
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --uid 10001 --create-home ledgerguard
-COPY --from=builder /app/target/release/ledgerguard /usr/local/bin/ledgerguard
-USER ledgerguard
+FROM rust:1.89-alpine AS builder
+RUN apk add --no-cache ca-certificates musl-dev
+WORKDIR /app
+
+ARG CARGO_PROFILE=release
+
+# Keep dependency compilation in a normal BuildKit layer so external cache
+# exporters (including GitHub Actions) can reuse it across ephemeral runners.
+COPY Cargo.toml Cargo.lock ./
+RUN --mount=type=cache,id=ledgerguard-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=ledgerguard-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    mkdir -p src \
+    && printf 'pub fn dependency_cache_seed() {}\n' > src/lib.rs \
+    && printf 'fn main() {}\n' > src/main.rs \
+    && cargo build --locked --profile "${CARGO_PROFILE}" \
+    && cargo clean --locked -p ledgerguard \
+    && rm -rf src
+
+COPY src ./src
+RUN --mount=type=cache,id=ledgerguard-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=ledgerguard-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo build --locked --profile "${CARGO_PROFILE}" \
+    && cp "target/${CARGO_PROFILE}/ledgerguard" /ledgerguard
+
+FROM scratch AS runtime
+WORKDIR /app
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /ledgerguard /ledgerguard
+COPY migrations /app/migrations
+
+USER 10001:10001
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/ledgerguard"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 CMD ["/ledgerguard", "healthcheck"]
+ENTRYPOINT ["/ledgerguard"]

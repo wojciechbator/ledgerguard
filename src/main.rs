@@ -1,20 +1,32 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    env,
+    io::{Read, Write},
+    net::{SocketAddr, TcpStream},
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use ledgerguard::{
     api::{AppState, router},
     config::Config,
     infrastructure::{accounting::build_accounting_source, postgres::PgLedgerRepository},
 };
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
-use tracing::info;
-use tracing_subscriber::EnvFilter;
+use tracing::{Level, info};
+
+const DEFAULT_HEALTHCHECK_PORT: u16 = 8080;
+const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
+    if run_utility_command()? {
+        return Ok(());
+    }
+
     init_tracing();
 
     let config = Config::from_env()?;
@@ -46,7 +58,12 @@ async fn main() -> Result<()> {
         .await
         .context("failed to connect to PostgreSQL")?;
 
-    sqlx::migrate!()
+    let migrations_dir =
+        env::var("LEDGERGUARD_MIGRATIONS_DIR").unwrap_or_else(|_| "migrations".to_owned());
+    let migrator = Migrator::new(Path::new(&migrations_dir))
+        .await
+        .with_context(|| format!("failed to load database migrations from {migrations_dir}"))?;
+    migrator
         .run(&pool)
         .await
         .context("failed to apply database migrations")?;
@@ -91,9 +108,55 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn run_utility_command() -> Result<bool> {
+    let Some(command) = env::args().nth(1) else {
+        return Ok(false);
+    };
+
+    match command.as_str() {
+        "--version" | "version" => {
+            println!("ledgerguard {}", env!("CARGO_PKG_VERSION"));
+            Ok(true)
+        }
+        "healthcheck" => {
+            run_healthcheck()?;
+            Ok(true)
+        }
+        _ => bail!("unknown command: {command}"),
+    }
+}
+
+fn run_healthcheck() -> Result<()> {
+    let port = env::var("LEDGERGUARD_BIND_ADDR")
+        .ok()
+        .and_then(|value| value.parse::<SocketAddr>().ok())
+        .map_or(DEFAULT_HEALTHCHECK_PORT, |address| address.port());
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&address, HEALTHCHECK_TIMEOUT)
+        .with_context(|| format!("failed to connect to LedgerGuard at {address}"))?;
+    stream.set_read_timeout(Some(HEALTHCHECK_TIMEOUT))?;
+    stream.set_write_timeout(Some(HEALTHCHECK_TIMEOUT))?;
+    stream.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+
+    let mut response = [0_u8; 64];
+    let read = stream.read(&mut response)?;
+    let response = &response[..read];
+    ensure!(
+        response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"),
+        "LedgerGuard health endpoint did not return HTTP 200"
+    );
+    Ok(())
+}
+
 fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    let level = env::var("RUST_LOG")
+        .ok()
+        .and_then(|value| value.parse::<Level>().ok())
+        .unwrap_or(Level::INFO);
+    tracing_subscriber::fmt()
+        .with_max_level(level)
+        .compact()
+        .init();
 }
 
 async fn shutdown_signal() {
