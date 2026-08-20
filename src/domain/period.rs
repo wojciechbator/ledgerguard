@@ -41,6 +41,11 @@ impl Month {
                 .expect("validated month must always produce a date")
         }
     }
+
+    #[must_use]
+    pub fn contains(self, date: NaiveDate) -> bool {
+        date >= self.start() && date < self.next_start()
+    }
 }
 
 impl<'de> Deserialize<'de> for Month {
@@ -67,5 +72,13 @@ mod tests {
     fn deserialization_cannot_bypass_month_validation() {
         let result = serde_json::from_str::<Month>(r#"{"year":2026,"month":13}"#);
         assert_eq!(result.unwrap_err().to_string(), "month must be in 1..=12");
+    }
+
+    #[test]
+    fn contains_uses_half_open_month_boundary() {
+        let month = Month::new(2026, 8).unwrap();
+        assert!(month.contains(NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()));
+        assert!(month.contains(NaiveDate::from_ymd_opt(2026, 8, 31).unwrap()));
+        assert!(!month.contains(NaiveDate::from_ymd_opt(2026, 9, 1).unwrap()));
     }
 }
