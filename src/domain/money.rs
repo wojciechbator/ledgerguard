@@ -103,19 +103,28 @@ mod tests {
             Money::non_negative(dec!(1.001)).unwrap_err(),
             MoneyError::TooPrecise
         );
-        assert_eq!(Money::non_negative(dec!(1.230)).unwrap().amount(), dec!(1.23));
+        assert_eq!(
+            Money::non_negative(dec!(1.230)).unwrap().amount(),
+            dec!(1.23)
+        );
     }
 
     #[test]
     fn rejects_values_outside_numeric_20_2_storage_range() {
         let too_large = Decimal::from_str("1000000000000000000").unwrap();
-        assert_eq!(Money::non_negative(too_large).unwrap_err(), MoneyError::TooLarge);
+        assert_eq!(
+            Money::non_negative(too_large).unwrap_err(),
+            MoneyError::TooLarge
+        );
     }
 
     #[test]
     fn addition_cannot_bypass_supported_range() {
         let maximum = Money::non_negative(Decimal::from_str(MAX_AMOUNT).unwrap()).unwrap();
         let one_cent = Money::non_negative(dec!(0.01)).unwrap();
-        assert_eq!(maximum.checked_add(one_cent).unwrap_err(), MoneyError::TooLarge);
+        assert_eq!(
+            maximum.checked_add(one_cent).unwrap_err(),
+            MoneyError::TooLarge
+        );
     }
 }
