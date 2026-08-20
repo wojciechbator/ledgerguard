@@ -1,4 +1,4 @@
-use std::{env, fmt, net::SocketAddr, str::FromStr};
+use std::{env, fmt, fs, net::SocketAddr, str::FromStr};
 
 use anyhow::{Context, Result, bail};
 
@@ -8,16 +8,37 @@ use crate::application::AccountingProvider;
 pub struct SecretString(String);
 
 impl SecretString {
-    fn from_env(name: &'static str) -> Option<Self> {
-        env::var(name)
+    fn from_env_or_file(name: &'static str) -> Result<Option<Self>> {
+        let direct = env::var(name)
             .ok()
             .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-            .map(Self)
+            .filter(|value| !value.is_empty());
+        let file_var = format!("{name}_FILE");
+        let file_path = env::var(&file_var)
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+
+        match (direct, file_path) {
+            (Some(_), Some(_)) => bail!("set only one of {name} or {file_var}"),
+            (Some(value), None) => Ok(Some(Self(value))),
+            (None, Some(path)) => {
+                let value = fs::read_to_string(&path)
+                    .with_context(|| format!("failed to read {file_var} secret file: {path}"))?;
+                let value = value.trim().to_owned();
+                if value.is_empty() {
+                    bail!("{file_var} secret file is empty: {path}");
+                }
+                Ok(Some(Self(value)))
+            }
+            (None, None) => Ok(None),
+        }
     }
 
-    fn required_from_env(name: &'static str) -> Result<Self> {
-        Self::from_env(name).with_context(|| format!("{name} is required"))
+    fn required_from_env_or_file(name: &'static str) -> Result<Self> {
+        Self::from_env_or_file(name)?.with_context(|| {
+            format!("{name} is required (or provide {name}_FILE pointing at a secret file)")
+        })
     }
 
     #[must_use]
@@ -96,9 +117,9 @@ impl Config {
         let bind_addr = SocketAddr::from_str(&bind_addr)
             .with_context(|| format!("invalid LEDGERGUARD_BIND_ADDR: {bind_addr}"))?;
 
-        let database_url = SecretString::required_from_env("DATABASE_URL")?;
+        let database_url = SecretString::required_from_env_or_file("DATABASE_URL")?;
         let auth_disabled = bool_env("LEDGERGUARD_AUTH_DISABLED", false)?;
-        let api_token = SecretString::from_env("LEDGERGUARD_API_TOKEN");
+        let api_token = SecretString::from_env_or_file("LEDGERGUARD_API_TOKEN")?;
         if !auth_disabled && api_token.is_none() {
             bail!(
                 "LEDGERGUARD_API_TOKEN is required unless LEDGERGUARD_AUTH_DISABLED=true; never disable auth on an exposed deployment"
@@ -129,21 +150,21 @@ impl Config {
                 saldeo: SaldeoSettings {
                     base_url: saldeo_base_url.trim_end_matches('/').to_owned(),
                     username: optional_env("SALDEO_USERNAME"),
-                    api_token: SecretString::from_env("SALDEO_API_TOKEN"),
+                    api_token: SecretString::from_env_or_file("SALDEO_API_TOKEN")?,
                     company_program_id: optional_env("SALDEO_COMPANY_PROGRAM_ID"),
                 },
                 fakturownia: FakturowniaSettings {
                     account_domain: optional_env("FAKTUROWNIA_ACCOUNT_DOMAIN"),
                     department_id: optional_env("FAKTUROWNIA_DEPARTMENT_ID"),
-                    api_token: SecretString::from_env("FAKTUROWNIA_API_TOKEN"),
+                    api_token: SecretString::from_env_or_file("FAKTUROWNIA_API_TOKEN")?,
                 },
                 infakt: InfaktSettings {
-                    api_key: SecretString::from_env("INFAKT_API_KEY"),
+                    api_key: SecretString::from_env_or_file("INFAKT_API_KEY")?,
                 },
                 wfirma: WfirmaSettings {
-                    access_key: SecretString::from_env("WFIRMA_ACCESS_KEY"),
-                    secret_key: SecretString::from_env("WFIRMA_SECRET_KEY"),
-                    app_key: SecretString::from_env("WFIRMA_APP_KEY"),
+                    access_key: SecretString::from_env_or_file("WFIRMA_ACCESS_KEY")?,
+                    secret_key: SecretString::from_env_or_file("WFIRMA_SECRET_KEY")?,
+                    app_key: SecretString::from_env_or_file("WFIRMA_APP_KEY")?,
                     company_id: optional_env("WFIRMA_COMPANY_ID"),
                 },
             },
