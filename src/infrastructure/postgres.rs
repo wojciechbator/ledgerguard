@@ -55,7 +55,7 @@ impl LedgerRepository for PgLedgerRepository {
             .bind(entry.vat.map(Money::amount))
             .bind(&entry.category)
             .bind(&entry.counterparty)
-            .bind(source_to_str(entry.source))
+            .bind(entry.source.as_str())
             .execute(&mut *tx)
             .await
             .map_err(|err| RepositoryError::Storage(err.to_string()))?;
@@ -97,17 +97,9 @@ fn row_to_entry(row: sqlx::postgres::PgRow) -> Result<LedgerEntry, RepositoryErr
             )));
         }
     };
-    let source = match row.get::<String, _>("source").as_str() {
-        "saldeo" => SourceSystem::Saldeo,
-        "fakturownia" => SourceSystem::Fakturownia,
-        "infakt" => SourceSystem::Infakt,
-        "wfirma" => SourceSystem::Wfirma,
-        "manual" => SourceSystem::Manual,
-        other => {
-            return Err(RepositoryError::Storage(format!("unknown source: {other}")));
-        }
-    };
 
+    let source = SourceSystem::new(row.get::<String, _>("source"))
+        .map_err(|err| RepositoryError::Storage(err.to_string()))?;
     let gross = Money::non_negative(row.get("gross"))
         .map_err(|err| RepositoryError::Storage(err.to_string()))?;
     let net = row
@@ -139,15 +131,5 @@ const fn kind_to_str(kind: EntryKind) -> &'static str {
     match kind {
         EntryKind::Expense => "expense",
         EntryKind::Revenue => "revenue",
-    }
-}
-
-const fn source_to_str(source: SourceSystem) -> &'static str {
-    match source {
-        SourceSystem::Saldeo => "saldeo",
-        SourceSystem::Fakturownia => "fakturownia",
-        SourceSystem::Infakt => "infakt",
-        SourceSystem::Wfirma => "wfirma",
-        SourceSystem::Manual => "manual",
     }
 }
