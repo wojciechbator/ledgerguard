@@ -58,7 +58,8 @@ async fn main() -> Result<()> {
         .await
         .context("failed to connect to PostgreSQL")?;
 
-    let migrations_dir = env::var("LEDGERGUARD_MIGRATIONS_DIR").unwrap_or_else(|_| "migrations".to_owned());
+    let migrations_dir =
+        env::var("LEDGERGUARD_MIGRATIONS_DIR").unwrap_or_else(|_| "migrations".to_owned());
     let migrator = Migrator::new(Path::new(&migrations_dir))
         .await
         .with_context(|| format!("failed to load database migrations from {migrations_dir}"))?;
