@@ -101,9 +101,7 @@ fn row_to_entry(row: sqlx::postgres::PgRow) -> Result<LedgerEntry, RepositoryErr
         "saldeo" => SourceSystem::Saldeo,
         "manual" => SourceSystem::Manual,
         other => {
-            return Err(RepositoryError::Storage(format!(
-                "unknown source: {other}"
-            )));
+            return Err(RepositoryError::Storage(format!("unknown source: {other}")));
         }
     };
 

@@ -23,7 +23,10 @@ impl SaldeoGateway {
 
 #[async_trait]
 impl AccountingGateway for SaldeoGateway {
-    async fn fetch_entries(&self, _month: Month) -> Result<Vec<LedgerEntry>, AccountingGatewayError> {
+    async fn fetch_entries(
+        &self,
+        _month: Month,
+    ) -> Result<Vec<LedgerEntry>, AccountingGatewayError> {
         Err(AccountingGatewayError::NotConfigured(
             "dedicated Saldeo API credentials are pending".to_owned(),
         ))
