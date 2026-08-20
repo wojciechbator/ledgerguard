@@ -117,8 +117,7 @@ mod tests {
             SaldeoProtocolError::EmptyParameter("req_id".to_owned())
         );
         assert_eq!(
-            signed_get_request("/x", "user", "token", "id", &[("username", "other")])
-                .unwrap_err(),
+            signed_get_request("/x", "user", "token", "id", &[("username", "other")]).unwrap_err(),
             SaldeoProtocolError::DuplicateParameter("username".to_owned())
         );
     }
