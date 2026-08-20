@@ -78,9 +78,7 @@ pub async fn sync_month(
     })
 }
 
-fn validate_provider_gate(
-    descriptor: super::ProviderDescriptor,
-) -> Result<(), SyncError> {
+fn validate_provider_gate(descriptor: super::ProviderDescriptor) -> Result<(), SyncError> {
     if !descriptor.configured {
         return Err(SyncError::ProviderNotConfigured(descriptor.provider));
     }
@@ -273,7 +271,10 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(error, SyncError::ProviderNotVerified(AccountingProvider::Saldeo)));
+        assert!(matches!(
+            error,
+            SyncError::ProviderNotVerified(AccountingProvider::Saldeo)
+        ));
         assert!(!source.fetched.load(Ordering::SeqCst));
         assert!(repository.entries.lock().unwrap().is_empty());
     }
@@ -288,7 +289,10 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(error, SyncError::WritableProviderRefused(AccountingProvider::Saldeo)));
+        assert!(matches!(
+            error,
+            SyncError::WritableProviderRefused(AccountingProvider::Saldeo)
+        ));
         assert!(!source.fetched.load(Ordering::SeqCst));
     }
 
