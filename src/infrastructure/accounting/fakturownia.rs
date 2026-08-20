@@ -23,6 +23,10 @@ impl FakturowniaAdapter {
     fn configured(&self) -> bool {
         self.settings.account_domain.is_some() && self.settings.api_token.is_some()
     }
+
+    fn scope_configured(&self) -> bool {
+        self.settings.department_id.is_some()
+    }
 }
 
 #[async_trait]
@@ -32,6 +36,7 @@ impl AccountingSource for FakturowniaAdapter {
             provider: AccountingProvider::Fakturownia,
             display_name: "Fakturownia",
             configured: self.configured(),
+            scope_configured: self.scope_configured(),
             read_only: true,
             sync_enabled: false,
             capabilities: ProviderCapabilities {
@@ -55,10 +60,17 @@ impl AccountingSource for FakturowniaAdapter {
                 missing: "FAKTUROWNIA_ACCOUNT_DOMAIN and/or FAKTUROWNIA_API_TOKEN".to_owned(),
             });
         }
+        if !self.scope_configured() {
+            return Err(AccountingSourceError::ScopeNotConfigured {
+                provider: AccountingProvider::Fakturownia,
+                missing: "FAKTUROWNIA_DEPARTMENT_ID".to_owned(),
+            });
+        }
 
         Err(AccountingSourceError::NotEnabled {
             provider: AccountingProvider::Fakturownia,
-            reason: "transport is intentionally read-only and awaits contract fixtures before normalization is enabled".to_owned(),
+            reason: "read transport and pagination await redacted account fixtures before normalization is enabled"
+                .to_owned(),
         })
     }
 }
