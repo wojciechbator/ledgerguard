@@ -18,7 +18,7 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-r
 subtle = "2.6"
 thiserror = "2.0"
 tokio = { version = "1.0", features = ["macros", "net", "rt-multi-thread", "signal"] }
-tower-http = { version = "0.6", default-features = false, features = ["catch-panic", "request-id", "set-header", "timeout", "trace"] }
+tower-http = { version = "0.7", default-features = false, features = ["catch-panic", "request-id", "set-header", "timeout", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
 uuid = { version = "1.0", default-features = false, features = ["serde", "std", "v4"] }
