@@ -14,7 +14,7 @@ LedgerGuard is intentionally optimized as a small, network-bound service rather 
 
 ## Build and size policy
 
-- Production uses Rust 1.89 with a committed `Cargo.lock` and locked builds.
+- Production uses Rust 1.97 with a committed `Cargo.lock` and locked builds.
 - Release builds use thin LTO, one codegen unit, symbol stripping, abort-on-panic, and no debug info.
 - `release-size` is available for footprint experiments and uses `opt-level = "z"` plus fat LTO; it is not the default because the standard release profile preserves maximum runtime performance.
 - The container runtime is a non-root `scratch` image containing only the static executable, CA certificates, and SQL migrations.
