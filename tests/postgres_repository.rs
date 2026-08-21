@@ -27,12 +27,11 @@ async fn postgres_upsert_is_idempotent_month_scoped_and_batch_safe() {
         .await
         .expect("run migrations");
 
-    let category_index_exists: bool = sqlx::query_scalar(
-        "SELECT to_regclass('ledger_entries_category_idx') IS NOT NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("inspect ledger category index");
+    let category_index_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('ledger_entries_category_idx') IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("inspect ledger category index");
     assert!(
         !category_index_exists,
         "unused category index should not add write amplification to imports"
