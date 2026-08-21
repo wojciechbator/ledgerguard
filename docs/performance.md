@@ -7,6 +7,8 @@ LedgerGuard is intentionally optimized as a small, network-bound service rather 
 - Accounting imports are persisted in bounded multi-row PostgreSQL statements, never one round-trip per ledger entry.
 - No-op conflict updates are skipped to avoid unnecessary WAL and `updated_at` churn.
 - Monthly reads are backed by `(booked_on, id)` to satisfy both the date range and stable ordering.
+- The write-heavy ledger table does not maintain speculative secondary indexes: the former category index is removed until a category-filtered read path actually exists.
+- The embedded dashboard shell may use a short private browser cache, while API and health responses remain `no-store`.
 - Money validation uses a precomputed `NUMERIC(20,2)` ceiling; it does not parse the same decimal limit per record.
 - The HTTP healthcheck is implemented by the LedgerGuard binary itself so the runtime image does not need a shell, curl, or a package manager.
 
