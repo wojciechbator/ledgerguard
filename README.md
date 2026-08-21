@@ -1,10 +1,21 @@
 # LedgerGuard
 
-**Cash flow & cost planning service for small businesses.**
+**Rust / Axum / PostgreSQL cash-planning service for small businesses.**
 
 LedgerGuard answers one practical question: **how much can I safely spend right now?** It combines current cash, committed costs, tax/VAT/ZUS reserves, a minimum cash buffer and planned purchases into a deterministic planning result.
 
 Accounting platforms remain the source of truth. LedgerGuard stores a normalized read model plus planning policy; it never silently turns a forecast into an accounting fact.
+
+## Engineering snapshot
+
+- **DDD boundary:** planner rules are pure domain code; accounting providers sit behind a provider-neutral `AccountingSource` port.
+- **Provider isolation:** SaldeoSMART, Fakturownia/InvoiceOcean, inFakt and wFirma adapters map into neutral records instead of leaking vendor DTOs into the domain.
+- **Money correctness:** decimal strings end-to-end, no binary floating point, checked scale/range rules and negative-value rejection at deserialization boundaries.
+- **Idempotent sync:** `(source, external_id)` is the persistence identity, so corrected provider data updates the normalized record rather than duplicating it.
+- **Fail-closed integration:** provider imports reject duplicates, invalid months, oversized batches and unverified live-account assumptions.
+- **Production-minded small deploy:** loopback by default, non-root/read-only container, dropped capabilities, PostgreSQL contract tests and container smoke in CI.
+
+The interesting part is not the dashboard. It is keeping **accounting truth, imported evidence and planning policy as three different concepts** so a convenience tool cannot quietly become a second accounting system.
 
 ## Status
 
@@ -82,7 +93,7 @@ cd ledgerguard
 ./scripts/deploy-home.sh
 ```
 
-On the first run it creates a mode-`0600` `.env` with random PostgreSQL and LedgerGuard API tokens. **Do not commit that file and do not paste the token into chat.**
+On the first run it creates a mode-`0600` `.env` with random PostgreSQL and LedgerGuard API tokens. **Do not commit that file.**
 
 The service remains loopback-only by default:
 
@@ -92,7 +103,7 @@ Health:    http://127.0.0.1:8088/healthz
 Ready:     http://127.0.0.1:8088/readyz
 ```
 
-For remote use, expose it only through a private Tailscale/reverse-proxy boundary or an SSH tunnel. The dashboard itself is embedded in the Rust binary — there is no Node/Vite/React build and no CDN or external JavaScript dependency. It stores the bearer token only in browser `sessionStorage`; optional planner input persistence uses local browser storage.
+For remote use, expose it only through a private Tailscale/reverse-proxy boundary or an SSH tunnel. The dashboard is embedded in the Rust binary — there is no Node/Vite/React build and no CDN or external JavaScript dependency.
 
 When Saldeo credentials arrive, put them in `.env` on the host only after company scope is verified, then explicitly enable `LEDGERGUARD_LIVE_SYNC_ENABLED=true`.
 
@@ -128,23 +139,7 @@ curl -s http://127.0.0.1:8088/v1/planner/evaluate \
   }'
 ```
 
-Simulate a purchase by adding `purchase_gross` to the same request shape and POSTing it to `/v1/planner/simulate`:
-
-```json
-{
-  "input": {
-    "available_cash": "30000",
-    "committed_costs": "2000",
-    "tax_reserve": "4000",
-    "vat_reserve": "3000",
-    "zus_reserve": "2000",
-    "minimum_cash_buffer": "10000",
-    "planned_spend": "1000"
-  },
-  "policy": { "tight_threshold": "2000" },
-  "purchase_gross": "8900"
-}
-```
+Simulate a purchase by adding `purchase_gross` to the same request shape and POSTing it to `/v1/planner/simulate`.
 
 Money is represented with decimal arithmetic and transported as decimal strings, never binary floating point. Negative money values cannot be introduced through JSON deserialization.
 
