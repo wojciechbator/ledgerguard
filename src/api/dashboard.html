@@ -124,8 +124,16 @@
   const tokenInput = $("token");
   tokenInput.value = sessionStorage.getItem("ledgerguard_token") || "";
 
-  const remembered = JSON.parse(localStorage.getItem("ledgerguard_planner") || "null");
-  if (remembered) ids.forEach(id => { if (remembered[id] !== undefined) $(id).value = remembered[id]; });
+  let remembered = null;
+  try {
+    remembered = JSON.parse(localStorage.getItem("ledgerguard_planner") || "null");
+  } catch (_) {
+    localStorage.removeItem("ledgerguard_planner");
+    $("planner-note").textContent = "Usunięto uszkodzone lokalne wartości planera.";
+  }
+  if (remembered && typeof remembered === "object") {
+    ids.forEach(id => { if (remembered[id] !== undefined) $(id).value = remembered[id]; });
+  }
 
   const money = id => {
     const value = $(id).value.trim().replace(",", ".");
@@ -178,6 +186,20 @@
     $("decision").textContent = result.decision.toUpperCase();
     $("decision").className = `big ${decisionClass(result.decision)}`;
   }
+  function renderPurchaseResult(result) {
+    const container = $("purchase-result");
+    const decision = document.createElement("strong");
+    decision.className = decisionClass(result.decision);
+    decision.textContent = result.decision.toUpperCase();
+
+    const first = document.createElement("div");
+    first.append("Po zakupie: ", decision);
+    const safe = document.createElement("div");
+    safe.textContent = `safe-to-spend: ${format(result.safe_to_spend)}`;
+    const headroom = document.createElement("div");
+    headroom.textContent = `headroom: ${format(result.headroom)}`;
+    container.replaceChildren(first, safe, headroom);
+  }
 
   $("connect").onclick = async () => { sessionStorage.setItem("ledgerguard_token", tokenInput.value.trim()); await status(); };
   $("remember").onclick = () => {
@@ -192,8 +214,7 @@
   $("simulate").onclick = async () => {
     try {
       const body = await evaluate("/v1/planner/simulate", money("purchase"));
-      const r = body.result;
-      $("purchase-result").innerHTML = `Po zakupie: <strong class="${decisionClass(r.decision)}">${r.decision.toUpperCase()}</strong><br>safe-to-spend: ${format(r.safe_to_spend)}<br>headroom: ${format(r.headroom)}`;
+      renderPurchaseResult(body.result);
     } catch (e) { $("purchase-result").textContent = e.message; }
   };
   $("sync").onclick = async () => {
