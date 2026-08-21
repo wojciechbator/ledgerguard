@@ -83,7 +83,9 @@ mod tests {
             "DENY"
         );
         assert_eq!(
-            headers.get(&REFERRER_POLICY).expect("referrer policy header"),
+            headers
+                .get(&REFERRER_POLICY)
+                .expect("referrer policy header"),
             "no-referrer"
         );
         assert!(DASHBOARD_CSP.contains("frame-ancestors 'none'"));
