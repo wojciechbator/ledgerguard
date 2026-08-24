@@ -75,6 +75,9 @@ pub struct SaldeoSettings {
     pub username: Option<String>,
     pub api_token: Option<SecretString>,
     pub company_program_id: Option<String>,
+    /// Operator flips this once the live contract is verified. Fail-closed:
+    /// absent env means false.
+    pub sync_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +196,7 @@ impl Config {
                     username: optional_env("SALDEO_USERNAME"),
                     api_token: SecretString::from_env_or_file("SALDEO_API_TOKEN")?,
                     company_program_id: optional_env("SALDEO_COMPANY_PROGRAM_ID"),
+                    sync_enabled: bool_env("SALDEO_SYNC_ENABLED", false)?,
                 },
                 fakturownia: FakturowniaSettings {
                     account_domain: optional_env("FAKTUROWNIA_ACCOUNT_DOMAIN"),
