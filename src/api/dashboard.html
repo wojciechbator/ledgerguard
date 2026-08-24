@@ -83,6 +83,19 @@
         <div><div class="label">Netto</div><div class="big" id="month-net">&mdash;</div></div>
       </div>
       <div class="notice" id="month-detail">Wczytuje...</div>
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;color:#8b93a7;font-size:13px">+ Dodaj pozycję ręcznie</summary>
+        <div class="fields" style="margin-top:10px">
+          <label>Typ
+            <select id="manual-kind"><option value="expense">Koszt</option><option value="revenue">Przychód</option></select>
+          </label>
+          <label>Kwota brutto <input id="manual-gross" inputmode="decimal" placeholder="np. 239.00"></label>
+          <label>Data (opcjonalnie) <input id="manual-date" type="date"></label>
+          <label>Kategoria (opcjonalnie) <input id="manual-category" placeholder="np. marketing"></label>
+        </div>
+        <button id="manual-add" class="secondary" style="margin-top:10px">Zapisz pozycję</button>
+        <div class="notice" id="manual-result">Wpis trafi do księgi z źródłem „manual”.</div>
+      </details>
     </article>
 
     <aside class="card side">
@@ -275,6 +288,20 @@
       $("afford-result").replaceChildren(verdict, detail);
       await loadMonth();
     } catch (e) { $("afford-result").textContent = e.message; }
+  };
+
+  $("manual-add").onclick = async () => {
+    const gross = $("manual-gross").value.trim().replace(",", ".");
+    if (!gross) { $("manual-result").textContent = "Podaj kwotę."; return; }
+    const body = { kind: $("manual-kind").value, gross };
+    if ($("manual-date").value) body.booked_on = $("manual-date").value;
+    if ($("manual-category").value.trim()) body.category = $("manual-category").value.trim();
+    try {
+      await api("/v1/ledger/manual", { method: "POST", body: JSON.stringify(body) });
+      $("manual-result").textContent = "Zapisano.";
+      $("manual-gross").value = ""; $("manual-category").value = "";
+      await loadMonth();
+    } catch (e) { $("manual-result").textContent = e.message; }
   };
 
   loadMonth();
