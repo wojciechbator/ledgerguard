@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use reqwest::Client;
 use uuid::Uuid;
 
 use super::saldeo_protocol::{SaldeoHttpMethod, SaldeoRequest, signed_request};
@@ -17,12 +18,16 @@ const DOCUMENT_LIST_PATH: &str = "/api/xml/2.12/document/list";
 #[derive(Debug, Clone)]
 pub struct SaldeoAdapter {
     settings: SaldeoSettings,
+    http: reqwest::Client,
 }
 
 impl SaldeoAdapter {
     #[must_use]
-    pub const fn new(settings: SaldeoSettings) -> Self {
-        Self { settings }
+    pub fn new(settings: SaldeoSettings) -> Self {
+        Self {
+            settings,
+            http: Client::new(),
+        }
     }
 
     fn configured(&self) -> bool {
@@ -113,7 +118,9 @@ impl AccountingSource for SaldeoAdapter {
             configured: self.configured(),
             scope_configured: self.scope_configured(),
             read_only: true,
-            sync_enabled: false,
+            // Sync stays disabled until the operator explicitly flips the
+            // env flag; flipping it is a human decision recorded in config.
+            sync_enabled: self.settings.sync_enabled,
             capabilities: ProviderCapabilities {
                 revenues: true,
                 expenses: true,
@@ -142,7 +149,7 @@ impl AccountingSource for SaldeoAdapter {
 
     async fn fetch_records(
         &self,
-        _month: Month,
+        month: Month,
     ) -> Result<Vec<AccountingRecord>, AccountingSourceError> {
         if !self.configured() {
             return Err(AccountingSourceError::NotConfigured {
@@ -157,10 +164,45 @@ impl AccountingSource for SaldeoAdapter {
             });
         }
 
-        Err(AccountingSourceError::NotEnabled {
-            provider: AccountingProvider::Saldeo,
-            reason: "live XML response normalization stays gated until company.list scope and redacted document fixtures are verified".to_owned(),
-        })
+        if !self.settings.sync_enabled {
+            return Err(AccountingSourceError::NotEnabled {
+                provider: AccountingProvider::Saldeo,
+                reason: "SALDEO_SYNC_ENABLED not set; live document pulls stay gated until the operator verifies the contract".to_owned(),
+            });
+        }
+
+        let request = self.document_list_request()?;
+        let url = format!("{}{}", self.settings.base_url, request.path);
+        let mut request_builder = match request.method {
+            SaldeoHttpMethod::Get => self.http.get(url),
+            SaldeoHttpMethod::Post => self.http.post(url),
+        };
+        for (key, value) in &request.parameters {
+            request_builder = request_builder.query(&[(key.as_str(), value.as_str())]);
+        }
+        let response =
+            request_builder
+                .send()
+                .await
+                .map_err(|error| AccountingSourceError::Transport {
+                    provider: AccountingProvider::Saldeo,
+                    reason: error.to_string(),
+                })?;
+        if !response.status().is_success() {
+            return Err(AccountingSourceError::Transport {
+                provider: AccountingProvider::Saldeo,
+                reason: format!("status {}", response.status()),
+            });
+        }
+        let body = response
+            .text()
+            .await
+            .map_err(|_| AccountingSourceError::InvalidData {
+                provider: AccountingProvider::Saldeo,
+                reason: "document.list returned non-text body".into(),
+            })?;
+
+        super::saldeo_xml::normalize_document_list(&body, month)
     }
 }
 
@@ -172,6 +214,7 @@ mod tests {
     fn configured_settings() -> SaldeoSettings {
         SaldeoSettings {
             base_url: "https://saldeo.brainshare.pl".to_owned(),
+            sync_enabled: false,
             username: Some("user".to_owned()),
             api_token: Some(SecretString::for_test("token")),
             company_program_id: Some("company-123".to_owned()),
@@ -209,6 +252,7 @@ mod tests {
     fn preflight_allows_absent_credentials_but_rejects_partial_configuration() {
         let empty = SaldeoSettings {
             base_url: "https://saldeo.brainshare.pl".to_owned(),
+            sync_enabled: false,
             username: None,
             api_token: None,
             company_program_id: None,
@@ -217,6 +261,7 @@ mod tests {
 
         let partial = SaldeoSettings {
             base_url: "https://saldeo.brainshare.pl".to_owned(),
+            sync_enabled: false,
             username: Some("user".to_owned()),
             api_token: None,
             company_program_id: None,
