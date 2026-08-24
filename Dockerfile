@@ -18,11 +18,16 @@ RUN --mount=type=cache,id=ledgerguard-cargo-registry,target=/usr/local/cargo/reg
     && cargo clean --locked -p ledgerguard \
     && rm -rf src
 
+# Real build goes into a fresh target dir: the dependency-seed phase above
+# leaves a stub fn main(){} binary behind, and any fingerprint subtlety in
+# `cargo clean -p` would otherwise let the stub ship as the service
+# (symptom: silent exit 0 with empty logs).
 COPY src ./src
 RUN --mount=type=cache,id=ledgerguard-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=ledgerguard-cargo-git,target=/usr/local/cargo/git,sharing=locked \
-    cargo build --locked --profile "${CARGO_PROFILE}" \
-    && cp "target/${CARGO_PROFILE}/ledgerguard" /ledgerguard
+    CARGO_TARGET_DIR=/app/target-final cargo build --locked --profile "${CARGO_PROFILE}" \
+    && /app/target-final/release/ledgerguard version | grep -q "ledgerguard " \
+    && cp "/app/target-final/release/ledgerguard" /ledgerguard
 
 FROM scratch AS runtime
 WORKDIR /app
