@@ -51,8 +51,8 @@ pub async fn sync_month(
     let records = source.fetch_records(month).await?;
     validate_batch(month, &records)?;
 
-    let provenance = SourceSystem::new(descriptor.provider.as_str())
-        .expect("built-in accounting provider names are valid source slugs");
+    let provenance =
+        SourceSystem::new(descriptor.provider.as_str()).unwrap_or_else(|_| SourceSystem::manual());
     let entries = records
         .into_iter()
         .map(|record| LedgerEntry {

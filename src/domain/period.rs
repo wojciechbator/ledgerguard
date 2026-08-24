@@ -28,18 +28,16 @@ impl Month {
     }
 
     pub fn start(self) -> NaiveDate {
-        NaiveDate::from_ymd_opt(self.year, self.month, 1)
-            .expect("validated month must always produce a date")
+        NaiveDate::from_ymd_opt(self.year, self.month, 1).unwrap_or_default()
     }
 
     pub fn next_start(self) -> NaiveDate {
-        if self.month == 12 {
-            NaiveDate::from_ymd_opt(self.year + 1, 1, 1)
-                .expect("validated year must always produce a date")
+        let (year, month) = if self.month == 12 {
+            (self.year.saturating_add(1), 1)
         } else {
-            NaiveDate::from_ymd_opt(self.year, self.month + 1, 1)
-                .expect("validated month must always produce a date")
-        }
+            (self.year, self.month + 1)
+        };
+        NaiveDate::from_ymd_opt(year, month, 1).unwrap_or_default()
     }
 
     #[must_use]

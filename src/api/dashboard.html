@@ -75,6 +75,24 @@
       <div class="notice">lokalny serwis LedgerGuard</div>
     </article>
 
+    <article class="card planner" style="background:rgba(16,20,28,.92)">
+      <h2>Ten miesiac z Saldeo</h2>
+      <div class="result" style="margin-top:12px;border-top:0;padding-top:0">
+        <div><div class="label">Przychody</div><div class="big ok" id="month-income">&mdash;</div></div>
+        <div><div class="label">Koszty</div><div class="big bad" id="month-costs">&mdash;</div></div>
+        <div><div class="label">Netto</div><div class="big" id="month-net">&mdash;</div></div>
+      </div>
+      <div class="notice" id="month-detail">Wczytuje...</div>
+    </article>
+
+    <aside class="card side">
+      <h2>Czy moge to kupic?</h2>
+      <p class="notice" style="margin:0 0 10px">Porownuje planowany wydatek z budzetem kosztow i tym, co juz tego miesiaca wydano.</p>
+      <label>Kwota brutto <input id="afford-amount" inputmode="decimal" placeholder="np. 1500"></label>
+      <button id="afford" style="margin-top:12px">Sprawdz</button>
+      <div class="notice" id="afford-result">—</div>
+    </aside>
+
     <article class="card planner">
       <h2>Safe-to-spend</h2>
       <div class="fields">
@@ -225,6 +243,41 @@
       await status();
     } catch (e) { $("sync-result").textContent = e.message; }
   };
+  async function loadMonth() {
+    try {
+      const m = await api("/v1/ledger/month");
+      $("month-income").textContent = format(m.income);
+      $("month-costs").textContent = format(m.costs);
+      const netEl = $("month-net");
+      netEl.textContent = format(m.net);
+      netEl.className = `big ${m.net.startsWith("-") ? "bad" : "ok"}`;
+      $("month-detail").textContent = `${m.entries} pozycji w ksiedze. ${m.budget_configured ? "" : "Ustaw budzet, aby widziec werdykt."}`;
+    } catch (e) {
+      $("month-detail").textContent = `Blad: ${e.message}`;
+    }
+  }
+
+  $("afford").onclick = async () => {
+    const amount = $("afford-amount").value.trim().replace(",", ".");
+    if (!amount) { $("afford-result").textContent = "Podaj kwote."; return; }
+    try {
+      const v = await api(`/v1/planner/affordability?amount=${encodeURIComponent(amount)}`);
+      const verdict = document.createElement("strong");
+      verdict.className = v.decision ? decisionClass(v.decision) : "warn";
+      verdict.textContent = v.decision ? v.decision.toUpperCase() : "BRAK BUDZETU";
+      const detail = document.createElement("div");
+      detail.textContent = `${v.message} Koszty MTD: ${format(v.costs)}.`;
+      if (v.headroom !== null) {
+        const left = document.createElement("div");
+        left.textContent = `Pozostaje: ${format(v.headroom)}`;
+        detail.append(left);
+      }
+      $("afford-result").replaceChildren(verdict, detail);
+      await loadMonth();
+    } catch (e) { $("afford-result").textContent = e.message; }
+  };
+
+  loadMonth();
   status();
 })();
 </script>

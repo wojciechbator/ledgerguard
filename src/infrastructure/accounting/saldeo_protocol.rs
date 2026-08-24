@@ -84,10 +84,7 @@ fn saldeo_url_encode(input: &str) -> String {
                 encoded.push(char::from(*byte));
             }
             b' ' => encoded.push('+'),
-            other => {
-                use std::fmt::Write as _;
-                write!(&mut encoded, "%{other:02X}").expect("writing to String cannot fail");
-            }
+            other => encoded.push_str(&format!("%{other:02X}")),
         }
     }
     encoded

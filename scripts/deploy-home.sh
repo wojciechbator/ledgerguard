@@ -44,6 +44,9 @@ LEDGERGUARD_PORT=8088
 RUST_LOG=ledgerguard=info,tower_http=info
 LEDGERGUARD_ACCOUNTING_PROVIDER=saldeo
 LEDGERGUARD_LIVE_SYNC_ENABLED=false
+# Cost ceiling for one calendar month, e.g. 12000.00. Empty = no verdicts.
+# LEDGERGUARD_MONTHLY_COST_BUDGET=
+# LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS=1000
 SALDEO_BASE_URL=https://saldeo.brainshare.pl
 # SALDEO_USERNAME=
 # SALDEO_API_TOKEN=

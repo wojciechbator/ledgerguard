@@ -1,4 +1,4 @@
 mod dashboard;
 mod routes;
 
-pub use routes::{AppState, router};
+pub use routes::{ApiAuth, AppState, router};
