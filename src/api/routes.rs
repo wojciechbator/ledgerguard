@@ -27,8 +27,8 @@ use crate::{
     },
     config::BudgetSettings,
     domain::{
-        BudgetPolicy, Decision, EntryKind, Money, Month, MonthSummary, Planner, PlannerInput,
-        PlannerPolicy, PlannerResult,
+        BudgetPolicy, Decision, EntryKind, LedgerEntry, Money, Month, MonthSummary, Planner,
+        PlannerInput, PlannerPolicy, PlannerResult,
     },
 };
 
@@ -132,6 +132,7 @@ pub fn router(state: AppState, auth: ApiAuth) -> Router {
         .route("/planner/evaluate", post(evaluate))
         .route("/planner/simulate", post(simulate))
         .route("/ledger/month", get(ledger_month))
+        .route("/ledger/manual", post(add_manual_entry))
         .route("/planner/affordability", get(affordability));
 
     if let ApiAuth::Bearer(expected) = auth {
@@ -470,5 +471,71 @@ async fn affordability(
         headroom,
         decision,
         message,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ManualEntryRequest {
+    kind: EntryKind,
+    /// Decimal string like "239.00". Gross amount, PLN.
+    gross: String,
+    /// ISO date YYYY-MM-DD; defaults to today (Europe/Warsaw host clock).
+    booked_on: Option<String>,
+    category: Option<String>,
+    counterparty: Option<String>,
+}
+
+async fn add_manual_entry(
+    State(state): State<AppState>,
+    Json(request): Json<ManualEntryRequest>,
+) -> Result<Json<LedgerEntryView>, ApiError> {
+    let gross_decimal = rust_decimal::Decimal::from_str(request.gross.trim()).map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_amount",
+            "gross must be a decimal like 239.00",
+        )
+    })?;
+    let gross = Money::non_negative(gross_decimal).map_err(|error| {
+        ApiError::new(StatusCode::BAD_REQUEST, "invalid_amount", error.to_string())
+    })?;
+    let booked_on = match request.booked_on.as_deref().map(str::trim) {
+        None | Some("") => chrono::Local::now().date_naive(),
+        Some(raw) => raw.parse::<chrono::NaiveDate>().map_err(|_| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_date",
+                "booked_on must be ISO YYYY-MM-DD",
+            )
+        })?,
+    };
+
+    let entry = LedgerEntry {
+        id: uuid::Uuid::new_v4(),
+        external_id: format!("manual-{}", uuid::Uuid::new_v4()),
+        kind: request.kind,
+        booked_on,
+        gross,
+        net: None,
+        vat: None,
+        category: request.category.filter(|c| !c.trim().is_empty()),
+        counterparty: request.counterparty.filter(|c| !c.trim().is_empty()),
+        source: crate::domain::SourceSystem::manual(),
+    };
+    state
+        .ledger
+        .upsert_entries(std::slice::from_ref(&entry))
+        .await
+        .map_err(map_repository_error)?;
+
+    Ok(Json(LedgerEntryView {
+        booked_on: entry.booked_on.to_string(),
+        kind: match entry.kind {
+            EntryKind::Revenue => "revenue",
+            EntryKind::Expense => "expense",
+        },
+        gross: entry.gross.amount().to_string(),
+        category: entry.category,
+        counterparty: entry.counterparty,
     }))
 }
