@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use ledgerguard::{
-    api::{AppState, router},
+    api::{ApiAuth, AppState, router},
     config::Config,
     infrastructure::{accounting::build_accounting_source, postgres::PgLedgerRepository},
 };
@@ -74,17 +74,15 @@ async fn main() -> Result<()> {
         accounting,
         ledger,
         live_sync_enabled: config.runtime.live_sync_enabled,
+        budget: config.budget.clone(),
     };
-    let app = router(
-        state,
-        config
-            .runtime
-            .api_token
-            .as_ref()
-            .map(|token| token.expose()),
-        config.runtime.auth_disabled,
-    )
-    .layer(TraceLayer::new_for_http());
+    let auth = match config.runtime.api_token.as_ref() {
+        Some(token) => ApiAuth::Bearer(Arc::from(token.expose())),
+        // Config validation only allows a missing token together with
+        // LEDGERGUARD_AUTH_DISABLED on a loopback bind.
+        None => ApiAuth::Disabled,
+    };
+    let app = router(state, auth).layer(TraceLayer::new_for_http());
 
     let listener = TcpListener::bind(config.bind_addr)
         .await
@@ -161,17 +159,19 @@ fn init_tracing() {
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        // A failed handler install must not take the service down; the loop
+        // simply never resolves and systemd's stop timeout does the rest.
+        let _ = tokio::signal::ctrl_c().await;
     };
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => tracing::warn!(%error, "SIGTERM handler unavailable"),
+        }
     };
 
     #[cfg(not(unix))]

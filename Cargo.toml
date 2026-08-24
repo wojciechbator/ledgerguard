@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
 md5 = { package = "md-5", version = "0.10" }
 rust_decimal = { version = "1.36", default-features = false, features = ["std"] }

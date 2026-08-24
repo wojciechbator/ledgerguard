@@ -71,8 +71,10 @@ impl Planner {
             + input.planned_spend.amount()
             + extra_spend;
         let headroom = input.available_cash.amount() - deductions;
-        let safe_to_spend = Money::non_negative(headroom.max(Decimal::ZERO))
-            .expect("headroom cannot exceed the validated available-cash bound");
+        // headroom <= available_cash <= MAX by validated inputs; the clamp is
+        // defensive and falls back to zero rather than trusting arithmetic.
+        let safe_to_spend =
+            Money::non_negative(headroom.max(Decimal::ZERO)).unwrap_or_else(|_| Money::zero());
 
         let decision = if headroom <= Decimal::ZERO {
             Decision::Blocked

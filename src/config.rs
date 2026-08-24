@@ -1,8 +1,10 @@
 use std::{env, fmt, fs, net::SocketAddr, str::FromStr};
 
+use rust_decimal::Decimal;
+
 use anyhow::{Context, Result, bail};
 
-use crate::application::AccountingProvider;
+use crate::{application::AccountingProvider, domain::Money};
 
 const MIN_API_TOKEN_BYTES: usize = 32;
 
@@ -96,6 +98,15 @@ pub struct WfirmaSettings {
 }
 
 #[derive(Debug, Clone)]
+pub struct BudgetSettings {
+    /// Planned cost ceiling per calendar month. `None` disables affordability
+    /// verdicts instead of guessing one.
+    pub monthly_cost_budget: Option<Money>,
+    /// Remaining-budget share (basis points) at which the verdict turns Tight.
+    pub tight_share_basis_points: u16,
+}
+
+#[derive(Debug, Clone)]
 pub struct AccountingSettings {
     pub provider: AccountingProvider,
     pub saldeo: SaldeoSettings,
@@ -109,6 +120,7 @@ pub struct Config {
     pub bind_addr: SocketAddr,
     pub database_url: SecretString,
     pub runtime: RuntimeSettings,
+    pub budget: BudgetSettings,
     pub accounting: AccountingSettings,
 }
 
@@ -135,6 +147,36 @@ impl Config {
             bail!("SALDEO_BASE_URL must use https://");
         }
 
+        let budget = BudgetSettings {
+            monthly_cost_budget: match optional_env("LEDGERGUARD_MONTHLY_COST_BUDGET") {
+                Some(raw) => Some(
+                    Decimal::from_str(&raw)
+                        .ok()
+                        .and_then(|value| Money::non_negative(value).ok())
+                        .with_context(|| {
+                            format!("LEDGERGUARD_MONTHLY_COST_BUDGET must be a non-negative decimal, got {raw:?}")
+                        })?,
+                ),
+                None => None,
+            },
+            tight_share_basis_points: match optional_env("LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS") {
+                Some(raw) => raw.parse::<u16>().map_err(|error| {
+                    anyhow::anyhow!("invalid LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS {raw:?}: {error}")
+                })?,
+                None => 1_000,
+            },
+        };
+        if let Some(budget) = budget.monthly_cost_budget {
+            anyhow::ensure!(
+                budget.amount() > Decimal::ZERO,
+                "LEDGERGUARD_MONTHLY_COST_BUDGET must be greater than zero"
+            );
+        }
+        anyhow::ensure!(
+            budget.tight_share_basis_points <= 5_000,
+            "LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS must be at most 5000"
+        );
+
         Ok(Self {
             bind_addr,
             database_url,
@@ -143,6 +185,7 @@ impl Config {
                 auth_disabled,
                 live_sync_enabled: bool_env("LEDGERGUARD_LIVE_SYNC_ENABLED", false)?,
             },
+            budget,
             accounting: AccountingSettings {
                 provider,
                 saldeo: SaldeoSettings {

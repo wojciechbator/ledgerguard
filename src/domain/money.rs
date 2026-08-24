@@ -26,6 +26,13 @@ pub enum MoneyError {
 pub struct Money(Decimal);
 
 impl Money {
+    /// Domain ceiling mirrored from MAX_AMOUNT so callers can saturate
+    /// without re-running fallible construction.
+    #[must_use]
+    pub const fn max_value() -> Self {
+        Self(MAX_AMOUNT)
+    }
+
     pub const fn zero() -> Self {
         Self(Decimal::ZERO)
     }
