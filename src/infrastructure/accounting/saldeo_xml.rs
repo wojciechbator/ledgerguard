@@ -41,8 +41,24 @@ pub fn normalize_document_list(
                 }
             }
             Ok(Event::Text(text_event)) => {
-                if in_document && let Ok(decoded) = std::str::from_utf8(text_event.as_ref()) {
-                    text.push_str(decoded);
+                if !in_document {
+                    continue;
+                }
+                // Entities (&amp;, &lt;, numeric refs) travel inline inside
+                // Text events, so they must be decoded here or a contractor
+                // like "R&amp;D" would be stored literally corrupted. A value
+                // that fails to decode (e.g. a bare "&" in non-conformant
+                // XML) keeps its raw bytes: tolerance beats dropping data.
+                let decoded = text_event
+                    .unescape()
+                    .unwrap_or_else(|_| String::from_utf8_lossy(text_event.as_ref()));
+                text.push_str(&decoded);
+            }
+            Ok(Event::CData(cdata)) => {
+                // CDATA content is raw by definition (no entity encoding);
+                // absorbing it as plain text is the whole point of the fix.
+                if in_document {
+                    text.push_str(&String::from_utf8_lossy(cdata.as_ref()));
                 }
             }
             Ok(Event::End(element)) => {
@@ -97,11 +113,10 @@ impl DocumentFields {
     fn absorb(&mut self, leaf_element: &str, raw_text: &str) {
         let value = raw_text.trim();
         match leaf_element {
-            "document_id" | "id" => {
-                if self.id.is_empty() {
-                    self.id = value.to_owned();
-                }
-            }
+            // Repeated scalar elements are last-write-wins across the board
+            // (amounts always were; ids join them), so a provider correction
+            // later in the document is the one that lands.
+            "document_id" | "id" => self.id = value.to_owned(),
             "document_type" | "type" => self.kind_text = value.to_owned(),
             "date_issued" | "date_issue" => self.issue_date = value.to_owned(),
             "price_gross" | "total_gross" => self.gross = parse_decimal(value),
@@ -285,6 +300,79 @@ mod tests {
                 .as_ref()
                 .map(|money| money.amount().to_string()),
             Some("813.01".into())
+        );
+    }
+
+    #[test]
+    fn xml_entities_are_decoded_not_stored_literally() {
+        let xml = r#"<response><document_list><document>
+            <document_id>7</document_id>
+            <document_type>cost</document_type>
+            <date_issued>2026-08-05</date_issued>
+            <price_gross>10.00</price_gross>
+            <contractor_name>R&amp;D &lt;Lab&gt; Sp. z &#322; o.o.</contractor_name>
+        </document></document_list></response>"#;
+        let records =
+            normalize_document_list(xml, Month::new(2026, 8).unwrap()).expect("normalizes");
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].counterparty.as_deref(),
+            Some("R&D <Lab> Sp. z ł o.o.")
+        );
+    }
+
+    #[test]
+    fn double_escaped_entity_is_unescaped_exactly_one_level() {
+        // XML has no recursive entity resolution: "&amp;amp;" is the literal
+        // text "&amp;" after one decode pass, not "&".
+        let xml = r#"<response><document_list><document>
+            <document_id>8</document_id>
+            <document_type>cost</document_type>
+            <date_issued>2026-08-06</date_issued>
+            <price_gross>10.00</price_gross>
+            <contractor_name>A &amp;amp; B</contractor_name>
+        </document></document_list></response>"#;
+        let records =
+            normalize_document_list(xml, Month::new(2026, 8).unwrap()).expect("normalizes");
+        assert_eq!(records[0].counterparty.as_deref(), Some("A &amp; B"));
+    }
+
+    #[test]
+    fn cdata_sections_are_absorbed_as_text() {
+        let xml = "<response><document_list><document>
+            <document_id>9</document_id>
+            <document_type>cost</document_type>
+            <date_issued>2026-08-07</date_issued>
+            <price_gross>10.00</price_gross>
+            <contractor_name><![CDATA[Firma <> Sp. z o.o. & Wspolnicy]]></contractor_name>
+        </document></document_list></response>";
+        let records =
+            normalize_document_list(xml, Month::new(2026, 8).unwrap()).expect("normalizes");
+        assert_eq!(
+            records[0].counterparty.as_deref(),
+            Some("Firma <> Sp. z o.o. & Wspolnicy")
+        );
+    }
+
+    #[test]
+    fn repeated_scalar_elements_are_last_write_wins() {
+        let xml = r#"<response><document_list><document>
+            <document_id>stale</document_id>
+            <document_type>cost</document_type>
+            <date_issued>2026-08-08</date_issued>
+            <price_gross>1.00</price_gross>
+            <id>10</id>
+            <total_gross>42.50</total_gross>
+        </document></document_list></response>"#;
+        let records =
+            normalize_document_list(xml, Month::new(2026, 8).unwrap()).expect("normalizes");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].external_id, "10", "later id element wins");
+        // Money::non_negative normalizes scale, hence 42.50 → 42.5.
+        assert_eq!(
+            records[0].gross.amount().to_string(),
+            "42.5",
+            "later amount element wins"
         );
     }
 }

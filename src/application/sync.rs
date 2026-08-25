@@ -230,6 +230,24 @@ mod tests {
         ) -> Result<Vec<LedgerEntry>, RepositoryError> {
             Ok(self.entries.lock().unwrap().clone())
         }
+
+        async fn recent_entries_for_month(
+            &self,
+            month: Month,
+            limit: i64,
+        ) -> Result<Vec<LedgerEntry>, RepositoryError> {
+            let mut entries: Vec<LedgerEntry> = self
+                .entries
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|entry| month.contains(entry.booked_on))
+                .cloned()
+                .collect();
+            entries.sort_by_key(|entry| std::cmp::Reverse(entry.booked_on));
+            entries.truncate(limit.max(0) as usize);
+            Ok(entries)
+        }
     }
 
     fn record(external_id: &str, day: u32) -> AccountingRecord {
