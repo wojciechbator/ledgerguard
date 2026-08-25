@@ -3,13 +3,14 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Request, State},
-    http::{HeaderName, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::Datelike;
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use subtle::ConstantTimeEq;
 use tower_http::{
@@ -34,6 +35,7 @@ use crate::{
 
 const MAX_JSON_BODY_BYTES: usize = 64 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const RECENT_ENTRY_LIMIT: i64 = 10;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -87,6 +89,7 @@ struct ApiErrorBody {
     message: String,
 }
 
+#[derive(Debug)]
 struct ApiError {
     status: StatusCode,
     code: &'static str,
@@ -165,12 +168,19 @@ pub fn router(state: AppState, auth: ApiAuth) -> Router {
 }
 
 async fn bearer_auth(State(expected): State<Arc<str>>, request: Request, next: Next) -> Response {
+    // Both sides are hashed before comparing: the digest has a fixed length,
+    // so ct_eq never branches on a token-length mismatch and the request path
+    // leaks nothing about the configured secret.
     let authorized = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
-        .is_some_and(|provided| bool::from(provided.as_bytes().ct_eq(expected.as_bytes())));
+        .is_some_and(|provided| {
+            let provided = Sha256::digest(provided.as_bytes());
+            let expected = Sha256::digest(expected.as_bytes());
+            bool::from(provided.as_slice().ct_eq(expected.as_slice()))
+        });
 
     if authorized {
         next.run(request).await
@@ -309,13 +319,22 @@ struct MonthQuery {
 
 impl MonthQuery {
     fn month(self) -> Result<Month, ApiError> {
-        let now = chrono::Local::now().date_naive();
+        let now = warsaw_now();
         let year = self.year.unwrap_or(now.year());
         let month = self.month.unwrap_or(now.month());
         Month::new(year, month).map_err(|error| {
             ApiError::new(StatusCode::BAD_REQUEST, "invalid_month", error.to_string())
         })
     }
+}
+
+/// Today's date in Europe/Warsaw, independent of the host or container clock
+/// configuration. Deployment runs UTC; without this anchor, "current month"
+/// defaults would flip at 22:00/23:00 UTC on Warsaw month boundaries.
+fn warsaw_now() -> NaiveDate {
+    chrono::Utc::now()
+        .with_timezone(&chrono_tz::Europe::Warsaw)
+        .date_naive()
 }
 
 fn map_repository_error(error: crate::application::RepositoryError) -> ApiError {
@@ -359,11 +378,16 @@ async fn ledger_month(
         .map_err(map_repository_error)?;
     let summary = MonthSummary::from_entries(&entries);
 
-    let mut sorted = entries;
-    sorted.sort_by_key(|entry| std::cmp::Reverse(entry.booked_on));
-    let recent = sorted
+    // The preview is bounded in SQL (ORDER BY booked_on DESC, id DESC LIMIT),
+    // so a heavy month no longer pays for a full materialize-and-sort just to
+    // render ten rows. The repository returns them newest-first already.
+    let recent_rows = state
+        .ledger
+        .recent_entries_for_month(month, RECENT_ENTRY_LIMIT)
+        .await
+        .map_err(map_repository_error)?;
+    let recent = recent_rows
         .iter()
-        .take(10)
         .map(|entry| LedgerEntryView {
             booked_on: entry.booked_on.to_string(),
             kind: match entry.kind {
@@ -479,14 +503,47 @@ struct ManualEntryRequest {
     kind: EntryKind,
     /// Decimal string like "239.00". Gross amount, PLN.
     gross: String,
-    /// ISO date YYYY-MM-DD; defaults to today (Europe/Warsaw host clock).
+    /// ISO date YYYY-MM-DD; defaults to today in Europe/Warsaw, regardless of
+    /// the server's own timezone configuration.
     booked_on: Option<String>,
     category: Option<String>,
     counterparty: Option<String>,
 }
 
+/// Upper bound for client-supplied `Idempotency-Key` values, matching the
+/// external_id byte budget enforced on synced batches (`MAX_EXTERNAL_ID_BYTES`
+/// in `application::sync`, which also allows the `manual-` prefix).
+const MAX_IDEMPOTENCY_KEY_BYTES: usize = 256;
+
+/// Validates an optional `Idempotency-Key` header for reuse as the external_id
+/// of a manual entry. Absent/empty means "generate one"; a present key must be
+/// non-empty after trimming, printable ASCII, and within the byte cap — the
+/// same shape `validate_batch` expects from provider ids. An unusable key is a
+/// 400, never silently ignored: silently generating a fresh id is exactly the
+/// duplicate-row bug retries are trying to avoid.
+fn sanitized_idempotency_key(raw: Option<&str>) -> Result<Option<String>, ApiError> {
+    let Some(trimmed) = raw.map(str::trim).filter(|key| !key.is_empty()) else {
+        return Ok(None);
+    };
+    if trimmed.len() > MAX_IDEMPOTENCY_KEY_BYTES
+        || !trimmed
+            .chars()
+            .all(|character| character.is_ascii_graphic())
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_idempotency_key",
+            format!(
+                "Idempotency-Key must be 1..={MAX_IDEMPOTENCY_KEY_BYTES} printable ASCII characters"
+            ),
+        ));
+    }
+    Ok(Some(trimmed.to_owned()))
+}
+
 async fn add_manual_entry(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<ManualEntryRequest>,
 ) -> Result<Json<LedgerEntryView>, ApiError> {
     let gross_decimal = rust_decimal::Decimal::from_str(request.gross.trim()).map_err(|_| {
@@ -500,7 +557,7 @@ async fn add_manual_entry(
         ApiError::new(StatusCode::BAD_REQUEST, "invalid_amount", error.to_string())
     })?;
     let booked_on = match request.booked_on.as_deref().map(str::trim) {
-        None | Some("") => chrono::Local::now().date_naive(),
+        None | Some("") => warsaw_now(),
         Some(raw) => raw.parse::<chrono::NaiveDate>().map_err(|_| {
             ApiError::new(
                 StatusCode::BAD_REQUEST,
@@ -510,9 +567,21 @@ async fn add_manual_entry(
         })?,
     };
 
+    // A retried POST (client timeout, lost response) must land on the same
+    // row: the unique key is (source, external_id), so the idempotency key —
+    // when the client supplies one — becomes the external_id basis and the
+    // upsert collapses onto the original entry. Without a key the behavior
+    // stays as before (fresh identity per call).
+    let idempotency_key =
+        sanitized_idempotency_key(headers.get("idempotency-key").and_then(|v| v.to_str().ok()))?;
+    let external_id = match idempotency_key {
+        Some(key) => format!("manual-{key}"),
+        None => format!("manual-{}", uuid::Uuid::new_v4()),
+    };
+
     let entry = LedgerEntry {
         id: uuid::Uuid::new_v4(),
-        external_id: format!("manual-{}", uuid::Uuid::new_v4()),
+        external_id,
         kind: request.kind,
         booked_on,
         gross,
@@ -538,4 +607,58 @@ async fn add_manual_entry(
         category: entry.category,
         counterparty: entry.counterparty,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idempotency_key_absent_or_blank_generates_fresh_identity() {
+        assert!(sanitized_idempotency_key(None).unwrap().is_none());
+        assert!(sanitized_idempotency_key(Some("")).unwrap().is_none());
+        assert!(sanitized_idempotency_key(Some("   ")).unwrap().is_none());
+    }
+
+    #[test]
+    fn idempotency_key_is_trimmed_and_capped() {
+        assert_eq!(
+            sanitized_idempotency_key(Some("  retry-42 "))
+                .unwrap()
+                .as_deref(),
+            Some("retry-42")
+        );
+        let max_key = "k".repeat(MAX_IDEMPOTENCY_KEY_BYTES);
+        assert_eq!(
+            sanitized_idempotency_key(Some(&max_key))
+                .unwrap()
+                .as_deref(),
+            Some(max_key.as_str())
+        );
+        let too_long = "k".repeat(MAX_IDEMPOTENCY_KEY_BYTES + 1);
+        assert!(sanitized_idempotency_key(Some(&too_long)).is_err());
+    }
+
+    #[test]
+    fn idempotency_key_rejects_control_and_non_ascii() {
+        assert!(sanitized_idempotency_key(Some("bad\nkey")).is_err());
+        assert!(sanitized_idempotency_key(Some("Zażółć gęślą jaźń")).is_err());
+    }
+
+    #[test]
+    fn warsaw_now_is_ahead_of_utc_at_the_day_boundary() {
+        // 2026-03-29 22:30 UTC is already 2026-03-30 in Warsaw (CEST, +02:00):
+        // a UTC-based "today" would attribute late-evening entries to the
+        // wrong day. This pins the timezone anchor the handlers rely on.
+        use chrono::TimeZone;
+        let instant = chrono::Utc
+            .with_ymd_and_hms(2026, 3, 29, 22, 30, 0)
+            .single()
+            .unwrap();
+        let warsaw = chrono_tz::Europe::Warsaw.from_utc_datetime(&instant.naive_utc());
+        assert_eq!(
+            warsaw.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 3, 30).unwrap()
+        );
+    }
 }

@@ -122,6 +122,33 @@ impl LedgerRepository for PgLedgerRepository {
 
         rows.into_iter().map(row_to_entry).collect()
     }
+
+    // Uses the (booked_on, id) index from migration 0003 in reverse; the
+    // LIMIT keeps the dashboard preview O(limit) instead of O(month).
+    async fn recent_entries_for_month(
+        &self,
+        month: Month,
+        limit: i64,
+    ) -> Result<Vec<LedgerEntry>, RepositoryError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, external_id, kind, booked_on, gross, net, vat,
+                   category, counterparty, source
+              FROM ledger_entries
+             WHERE booked_on >= $1 AND booked_on < $2
+             ORDER BY booked_on DESC, id DESC
+             LIMIT $3
+            "#,
+        )
+        .bind(month.start())
+        .bind(month.next_start())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| RepositoryError::Storage(err.to_string()))?;
+
+        rows.into_iter().map(row_to_entry).collect()
+    }
 }
 
 fn row_to_entry(row: sqlx::postgres::PgRow) -> Result<LedgerEntry, RepositoryError> {

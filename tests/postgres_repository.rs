@@ -37,6 +37,19 @@ async fn postgres_upsert_is_idempotent_month_scoped_and_batch_safe() {
         "unused category index should not add write amplification to imports"
     );
 
+    let orphaned_tables: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name FROM information_schema.tables \
+         WHERE table_schema = 'public' \
+           AND table_name IN ('monthly_budgets', 'cash_snapshots', 'sync_runs')",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("list leftover planning tables");
+    assert!(
+        orphaned_tables.is_empty(),
+        "tables unused by the service must stay dropped: {orphaned_tables:?}"
+    );
+
     sqlx::query("DELETE FROM ledger_entries")
         .execute(&pool)
         .await
