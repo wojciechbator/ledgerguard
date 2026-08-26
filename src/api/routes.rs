@@ -36,6 +36,8 @@ use crate::{
 const MAX_JSON_BODY_BYTES: usize = 64 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const RECENT_ENTRY_LIMIT: i64 = 10;
+const MAX_MANUAL_CATEGORY_BYTES: usize = 256;
+const MAX_MANUAL_COUNTERPARTY_BYTES: usize = 512;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -541,6 +543,28 @@ fn sanitized_idempotency_key(raw: Option<&str>) -> Result<Option<String>, ApiErr
     Ok(Some(trimmed.to_owned()))
 }
 
+/// Trims and validates an optional text field on a manual entry, matching the
+/// normalization the sync path applies via `normalize_optional_text`. Keeps
+/// manual and synced entries consistent: no leading/trailing whitespace, no
+/// over-length values, empty becomes None.
+fn normalize_manual_optional_text(
+    field: &'static str,
+    value: Option<&str>,
+    max_bytes: usize,
+) -> Result<Option<String>, ApiError> {
+    let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    if value.len() > max_bytes {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_field_length",
+            format!("{field} exceeds {max_bytes} bytes"),
+        ));
+    }
+    Ok(Some(value.to_owned()))
+}
+
 async fn add_manual_entry(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -579,6 +603,17 @@ async fn add_manual_entry(
         None => format!("manual-{}", uuid::Uuid::new_v4()),
     };
 
+    let category = normalize_manual_optional_text(
+        "category",
+        request.category.as_deref(),
+        MAX_MANUAL_CATEGORY_BYTES,
+    )?;
+    let counterparty = normalize_manual_optional_text(
+        "counterparty",
+        request.counterparty.as_deref(),
+        MAX_MANUAL_COUNTERPARTY_BYTES,
+    )?;
+
     let entry = LedgerEntry {
         id: uuid::Uuid::new_v4(),
         external_id,
@@ -587,8 +622,8 @@ async fn add_manual_entry(
         gross,
         net: None,
         vat: None,
-        category: request.category.filter(|c| !c.trim().is_empty()),
-        counterparty: request.counterparty.filter(|c| !c.trim().is_empty()),
+        category,
+        counterparty,
         source: crate::domain::SourceSystem::manual(),
     };
     state
