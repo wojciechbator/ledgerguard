@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""FakApp runtime code must be panic-free.
+"""LedgerGuard runtime code must be panic-free.
 
-A watchdog that dies takes its silence with it: no unwrap/expect on Option or
-Result, no panic!/unreachable!/todo! outside test modules. `unwrap_or*` is
-fine — it is total and cannot panic. Test modules are exempt.
+A financial service must not die on an unwrap; runtime code is panic-free.
+No unwrap/expect on Option or Result, no panic!/unreachable!/todo! outside
+test modules. `unwrap_or*` is fine — it is total and cannot panic.
 """
 from pathlib import Path
 import re
