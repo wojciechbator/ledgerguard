@@ -208,6 +208,7 @@ async fn run_email_ingest() -> Result<()> {
         sent_folder: config.email_ingest.sent_folder.clone(),
         recipient_filter: config.email_ingest.recipient_filter.clone(),
         subject_filter: config.email_ingest.subject_filter.clone(),
+        lookback_days: config.email_ingest.lookback_days,
     };
 
     let report = email_ingest::run_ingest(imap_config, &store).await?;

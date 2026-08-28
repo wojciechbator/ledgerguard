@@ -797,6 +797,7 @@ async fn trigger_email_ingest(
         sent_folder: ingest_config.sent_folder.clone(),
         recipient_filter: ingest_config.recipient_filter.clone(),
         subject_filter: ingest_config.subject_filter.clone(),
+        lookback_days: ingest_config.lookback_days,
     };
 
     // Spawn the ingest as a detached background task so the HTTP request
