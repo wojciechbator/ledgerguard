@@ -1,37 +1,22 @@
-services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ledgerguard
-      POSTGRES_USER: ledgerguard
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-    volumes:
-      - ledgerguard-postgres:/var/lib/postgresql/data
-    networks:
-      - database
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ledgerguard -d ledgerguard"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 128
-    mem_limit: 512m
-    stop_grace_period: 20s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+# Blue-green overlay for LedgerGuard production deploy.
+#
+# Defines app-green identical to app but with the green image and a
+# ledgerguard-app-green network alias. The blue-green deploy script starts
+# this alongside the current (blue) app, health-checks it, switches the
+# Caddy upstream to the green alias, then stops the old app.
+#
+# Usage:
+#   LEDGERGUARD_GREEN_TAG=sha-<new-sha> \
+#   docker compose --env-file .env -f compose.yaml -f compose.bluegreen.yaml \
+#     up -d --no-deps app-green
 
-  app:
+services:
+  app-green:
     build:
       context: .
       target: runtime
-    restart: unless-stopped
+    image: ledgerguard:${LEDGERGUARD_GREEN_TAG:?Set LEDGERGUARD_GREEN_TAG}
+    restart: "no"
     init: true
     depends_on:
       postgres:
@@ -74,7 +59,7 @@ services:
       egress:
       internal:
         aliases:
-          - ledgerguard-app
+          - ledgerguard-app-green
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777
@@ -96,40 +81,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-  proxy:
-    image: caddy:2.10-alpine
-    restart: unless-stopped
-    depends_on:
-      app:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:${LEDGERGUARD_PORT:-8088}:8080"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    networks:
-      - internal
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 64
-    mem_limit: 128m
-    stop_grace_period: 5s
-    healthcheck:
-      test: ["CMD", "caddy", "version"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-networks:
-  database:
-    internal: true
-  egress:
-  internal:
-
-volumes:
-  ledgerguard-postgres:
