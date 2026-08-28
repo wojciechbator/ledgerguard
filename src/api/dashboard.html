@@ -62,6 +62,7 @@
     .invoice-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .invoice-list th { text-align: left; color: #8e97aa; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; border-bottom: 1px solid #292f3d; }
     .invoice-list td { padding: 8px; border-bottom: 1px solid #1e2331; }
+    .badge { background: #1e2533; padding: 4px 10px; border-radius: 4px; font-size: 12px; }
     @media (min-width: 1000px) {
   .month-card { grid-column: span 7; }
   .month-card + .card.side { grid-column: span 5; }
@@ -278,6 +279,13 @@
   // The user can override it in the advanced section.
   let autoCommittedCosts = 0;
 
+  const money = id => {
+    const value = $(id).value.trim().replace(",", ".");
+    return value === "" ? "0" : value;
+  };
+  const format = value => `${value} zł`;
+  const decisionClass = value => value === "healthy" ? "ok" : value === "tight" ? "warn" : "bad";
+
   // Sync the combined "reserves_total" field with the individual reserve
   // fields. When the user edits the combined field directly, the value is
   // placed in tax_reserve and the others are zeroed (the API sums them all
@@ -339,10 +347,6 @@
     updateCostsLabel(); loadCosts(costsYear, costsMonth);
   };
 
-  const money = id => {
-    const value = $(id).value.trim().replace(",", ".");
-    return value === "" ? "0" : value;
-  };
   const input = () => ({
     available_cash: money("available_cash"),
     committed_costs: (parseFloat(money("committed_costs")) || 0) > 0 ? money("committed_costs") : autoCommittedCosts.toFixed(2),
@@ -364,9 +368,6 @@
     if (!response.ok) throw new Error(body.message || `${response.status} ${response.statusText}`);
     return body;
   }
-  const format = value => `${value} zł`;
-  const decisionClass = value => value === "healthy" ? "ok" : value === "tight" ? "warn" : "bad";
-
   // Derive a short human-readable label from the user agent so the device
   // list in the admin API is useful for identifying which session is which.
   function deviceLabel() {
