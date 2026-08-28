@@ -172,10 +172,10 @@
         <h2>Safe-to-spend</h2>
         <div class="fields">
           <label>Gotówka dostępna teraz <input id="available_cash" inputmode="decimal" value="0"></label>
-          <label>Podatki + rezerwy (PIT, VAT, ZUS, bufor) <input id="reserves_total" inputmode="decimal" value="0"></label>
           <label>Planowane wydatki <input id="planned_spend" inputmode="decimal" value="0"></label>
         </div>
         <div class="notice" style="margin-top:10px">Koszty bieżącego miesiąca (z faktur): <strong id="committed-display">0 zł</strong> <span style="color:#70798c">— auto z email-OCR</span></div>
+        <div class="notice" id="tax-breakdown" style="margin-top:6px">Podatki + rezerwy: <strong id="reserves-total-display">0 zł</strong> <span style="color:#70798c">— auto (PIT + VAT + ZUS + zdrowotna + bufor)</span></div>
         <div class="actions">
           <button id="evaluate">Policz teraz</button>
           <button id="remember" class="secondary">Zapamiętaj</button>
@@ -189,12 +189,14 @@
         <details style="margin-top:12px">
           <summary style="cursor:pointer;color:#8b93a7;font-size:13px">Szczegóły rezerw i ustawienia</summary>
           <div class="fields" style="margin-top:10px">
-            <label>Rezerwa PIT / podatek <input id="tax_reserve" inputmode="decimal" value="0"></label>
-            <label>Rezerwa VAT <input id="vat_reserve" inputmode="decimal" value="0"></label>
-            <label>ZUS / zdrowotna <input id="zus_reserve" inputmode="decimal" value="0"></label>
+            <label>PIT (auto — <span id="pit-rate">12</span>%) <input id="tax_reserve" inputmode="decimal" value="0"></label>
+            <label>VAT (auto — <span id="vat-rate">23</span>% kosztów) <input id="vat_reserve" inputmode="decimal" value="0"></label>
+            <label>ZUS <input id="zus_reserve" inputmode="decimal" value="0"></label>
+            <label>Zdrowotna <input id="health_reserve" inputmode="decimal" value="0"></label>
             <label>Minimalny bufor gotówki <input id="minimum_cash_buffer" inputmode="decimal" value="0"></label>
             <label>Próg „ciasno” <input id="tight_threshold" inputmode="decimal" value="2000"></label>
             <label>Koszty już zobowiązane (nadpisz) <input id="committed_costs" inputmode="decimal" value="0"></label>
+            <label>Suma rezerw (nadpisz wszystko) <input id="reserves_total" inputmode="decimal" value="0"></label>
           </div>
           <div class="notice" id="reserves-sum" style="margin-top:8px">Suma rezerw: 0 zł</div>
         </details>
@@ -268,7 +270,7 @@
 </main>
 <script>
 (() => {
-  const ids = ["available_cash","committed_costs","tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer","planned_spend","tight_threshold","reserves_total"];
+  const ids = ["available_cash","committed_costs","tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer","planned_spend","tight_threshold","reserves_total","health_reserve"];
   const $ = id => document.getElementById(id);
   const tokenInput = $("token");
   tokenInput.value = localStorage.getItem("ledgerguard_token") || "";
@@ -306,9 +308,10 @@
   // placed in tax_reserve and the others are zeroed (the API sums them all
   // anyway, so the split doesn't affect the result).
   function updateReservesTotal() {
-    const sum = parseFloat(money("tax_reserve")) + parseFloat(money("vat_reserve")) + parseFloat(money("zus_reserve")) + parseFloat(money("minimum_cash_buffer"));
+    const sum = parseFloat(money("tax_reserve")) + parseFloat(money("vat_reserve")) + parseFloat(money("zus_reserve")) + parseFloat(money("health_reserve")) + parseFloat(money("minimum_cash_buffer"));
     $("reserves_total").value = sum.toFixed(2);
     $("reserves-sum").textContent = `Suma rezerw: ${format(sum.toFixed(2))}`;
+    $("reserves-total-display").textContent = format(sum.toFixed(2));
   }
   function distributeReserves() {
     const total = parseFloat(money("reserves_total")) || 0;
@@ -316,13 +319,15 @@
     $("tax_reserve").value = total.toFixed(2);
     $("vat_reserve").value = "0";
     $("zus_reserve").value = "0";
+    $("health_reserve").value = "0";
     $("minimum_cash_buffer").value = "0";
     $("reserves-sum").textContent = `Suma rezerw: ${format(total.toFixed(2))}`;
+    $("reserves-total-display").textContent = format(total.toFixed(2));
   }
   // Wire up bidirectional sync: editing total distributes to individual;
   // editing individual fields updates the total.
   $("reserves_total").addEventListener("input", distributeReserves);
-  ["tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer"].forEach(id => {
+  ["tax_reserve","vat_reserve","zus_reserve","health_reserve","minimum_cash_buffer"].forEach(id => {
     $(id).addEventListener("input", updateReservesTotal);
   });
   // Initialize the combined field from stored individual values.
@@ -367,7 +372,9 @@
     committed_costs: (parseFloat(money("committed_costs")) || 0) > 0 ? money("committed_costs") : autoCommittedCosts.toFixed(2),
     tax_reserve: money("tax_reserve"),
     vat_reserve: money("vat_reserve"),
-    zus_reserve: money("zus_reserve"),
+    // Combine ZUS + health insurance into the single zus_reserve field
+    // the backend expects.
+    zus_reserve: (parseFloat(money("zus_reserve")) + parseFloat(money("health_reserve"))).toFixed(2),
     minimum_cash_buffer: money("minimum_cash_buffer"),
     planned_spend: money("planned_spend")
   });
@@ -480,7 +487,7 @@
     }
 
     try {
-      await Promise.all([status(), loadMonth(), loadCosts(), loadTrends()]);
+      await Promise.all([status(), loadMonth(), loadCosts(), loadTrends(), loadTaxEstimate()]);
       $("sync-result").textContent = activeToken !== bootstrap
         ? "✓ Połączono (token urządzenia aktywny)."
         : "✓ Połączono z API.";
@@ -728,6 +735,43 @@
     tableEl.innerHTML = tableHtml;
   }
 
+  // --- Tax estimate auto-fill ---
+  // Fetches auto-calculated PIT/VAT/ZUS/health from the API and fills
+  // the reserve fields if the user hasn't manually overridden them.
+  let taxEstimateLoaded = false;
+  async function loadTaxEstimate() {
+    try {
+      const t = await api("/v1/tax/estimate");
+      $("pit-rate").textContent = t.pit_rate_percent;
+      $("vat-rate").textContent = t.vat_rate_percent;
+
+      // Only auto-fill if the user hasn't manually set values
+      if (!taxEstimateLoaded) {
+        const currentTax = parseFloat(money("tax_reserve")) || 0;
+        const currentVat = parseFloat(money("vat_reserve")) || 0;
+        const currentZus = parseFloat(money("zus_reserve")) || 0;
+        const currentHealth = parseFloat(money("health_reserve")) || 0;
+        const currentBuffer = parseFloat(money("minimum_cash_buffer")) || 0;
+
+        // Only auto-fill if all reserve fields are zero (first load)
+        if (currentTax === 0 && currentVat === 0 && currentZus === 0 && currentHealth === 0 && currentBuffer === 0) {
+          $("tax_reserve").value = parseFloat(t.pit_estimate).toFixed(2);
+          $("vat_reserve").value = parseFloat(t.vat_estimate).toFixed(2);
+          $("zus_reserve").value = parseFloat(t.zus_estimate).toFixed(2);
+          $("health_reserve").value = parseFloat(t.health_insurance).toFixed(2);
+          updateReservesTotal();
+          taxEstimateLoaded = true;
+        }
+      }
+
+      // Always update the display breakdown
+      const total = parseFloat(t.total_tax_burden);
+      $("reserves-total-display").textContent = format(total.toFixed(2));
+    } catch (e) {
+      // Tax endpoint may not be available — silently ignore
+    }
+  }
+
   $("ingest-email").onclick = async () => {
     $("ingest-result").textContent = "Uruchamiam w tle…";
     try {
@@ -749,6 +793,7 @@
           await loadCosts(costsYear, costsMonth);
           await loadMonth();
           await loadTrends();
+          await loadTaxEstimate();
           const docs = await api("/v1/ingest/documents?limit=500");
           const afterCount = docs.documents ? docs.documents.length : 0;
           const newDocs = afterCount - beforeCount;
@@ -784,6 +829,7 @@
     loadMonth();
     loadCosts();
     loadTrends();
+    loadTaxEstimate();
     status();
   } else {
     $("month-detail").textContent = "Wpisz token API w zakładce Ustawienia, aby załadować dane.";

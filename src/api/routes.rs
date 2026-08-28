@@ -31,7 +31,7 @@ use crate::{
     application::{
         AccountingSource, LedgerRepository, ProviderDescriptor, SyncError, SyncReport, sync_month,
     },
-    config::{BudgetSettings, EmailIngestSettings},
+    config::{BudgetSettings, EmailIngestSettings, TaxSettings},
     domain::{
         BudgetPolicy, Decision, EntryKind, LedgerEntry, Money, Month, MonthSummary, Planner,
         PlannerInput, PlannerPolicy, PlannerResult,
@@ -64,6 +64,7 @@ pub struct AppState {
     pub live_sync_enabled: bool,
     pub budget: Arc<RwLock<BudgetSettings>>,
     pub email_ingest: Option<EmailIngestSettings>,
+    pub tax: Arc<TaxSettings>,
 }
 
 #[derive(Debug, Serialize)]
@@ -173,6 +174,7 @@ pub fn router(state: AppState, auth: ApiAuth) -> Router {
         .route("/ingest/documents", get(ingest_documents))
         .route("/costs/summary", get(costs_summary))
         .route("/costs/trends", get(costs_trends))
+        .route("/tax/estimate", get(tax_estimate))
         .route("/thomann/resolve", post(thomann_resolve))
         .route("/budget", get(get_budget))
         .route("/budget", post(update_budget));
@@ -963,6 +965,91 @@ async fn costs_trends(
     })?;
 
     Ok(Json(CostsTrendsResponse { months }))
+}
+
+// ---------------------------------------------------------------------------
+// Tax estimate endpoint
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct TaxEstimateResponse {
+    /// PIT estimate: pit_rate * monthly_income
+    pit_estimate: String,
+    /// VAT estimate: vat_rate * sum(net costs this month)
+    vat_estimate: String,
+    /// Fixed monthly ZUS contribution
+    zus_estimate: String,
+    /// Fixed monthly health insurance
+    health_insurance: String,
+    /// Sum of all tax reserves
+    total_tax_burden: String,
+    /// Effective tax rate as percentage of income (0-100)
+    effective_rate: String,
+    /// Net after all taxes and costs: income - costs - total_tax_burden
+    net_after_tax: String,
+    /// Configured rates for display
+    pit_rate_percent: String,
+    vat_rate_percent: String,
+}
+
+/// Auto-calculates Polish tax estimates (PIT, VAT, ZUS, health insurance)
+/// for the current or specified month. Uses the configured monthly income
+/// projection and the actual email-OCR costs for the month.
+async fn tax_estimate(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<MonthQuery>,
+) -> Result<Json<TaxEstimateResponse>, ApiError> {
+    let month = query.month()?;
+    let tax = state.tax.as_ref();
+
+    let entries = state
+        .ledger
+        .entries_for_month(month)
+        .await
+        .map_err(map_repository_error)?;
+    let summary = MonthSummary::from_entries(&entries);
+
+    let budget = state.budget.read().unwrap_or_else(|e| e.into_inner());
+    let monthly_income = budget.monthly_income.amount();
+    drop(budget);
+
+    // PIT: rate * income (ryczałt-style — on revenue, not profit)
+    let pit_estimate =
+        monthly_income * Decimal::from(tax.pit_rate_basis_points) / Decimal::from(10_000);
+
+    // VAT: rate * net costs (VAT charged on expenses that can be deducted)
+    let vat_estimate =
+        summary.costs.amount() * Decimal::from(tax.vat_rate_basis_points) / Decimal::from(10_000);
+
+    let zus = tax.zus_monthly.amount();
+    let health = tax.health_insurance_monthly.amount();
+    let total_burden = pit_estimate + vat_estimate + zus + health;
+
+    let effective_rate = if monthly_income > Decimal::ZERO {
+        (total_burden / monthly_income * Decimal::from(100)).to_string()
+    } else {
+        "0".to_string()
+    };
+
+    let net_after = monthly_income - summary.costs.amount() - total_burden;
+
+    Ok(Json(TaxEstimateResponse {
+        pit_estimate: pit_estimate.to_string(),
+        vat_estimate: vat_estimate.to_string(),
+        zus_estimate: zus.to_string(),
+        health_insurance: health.to_string(),
+        total_tax_burden: total_burden.to_string(),
+        effective_rate,
+        net_after_tax: net_after.to_string(),
+        pit_rate_percent: format!(
+            "{}",
+            Decimal::from(tax.pit_rate_basis_points) / Decimal::from(100)
+        ),
+        vat_rate_percent: format!(
+            "{}",
+            Decimal::from(tax.vat_rate_basis_points) / Decimal::from(100)
+        ),
+    }))
 }
 
 // ---------------------------------------------------------------------------

@@ -90,6 +90,7 @@ async fn main() -> Result<()> {
         live_sync_enabled: config.runtime.live_sync_enabled,
         budget: std::sync::Arc::new(std::sync::RwLock::new(config.budget.clone())),
         email_ingest,
+        tax: std::sync::Arc::new(config.tax.clone()),
     };
 
     // Spawn auto-sync background task for email-OCR ingest. Runs every
