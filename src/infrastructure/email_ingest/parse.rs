@@ -46,6 +46,17 @@ pub fn parse_invoice(text: &str) -> ParsedInvoice {
         vat_rate,
     };
 
+    // Sanity check: if net > gross, the net was likely parsed from a
+    // pre-discount amount (e.g. Thomann "Value of goods") or a product
+    // code matched across a newline. Discard net and vat so they can be
+    // recomputed from gross + vat_rate.
+    if let (Some(gross), Some(net)) = (result.gross, result.net)
+        && net > gross
+    {
+        result.net = None;
+        result.vat = None;
+    }
+
     // If we have net + vat but no gross, compute it.
     if result.gross.is_none()
         && let (Some(net), Some(vat)) = (result.net, result.vat)
@@ -94,6 +105,21 @@ pub fn parse_invoice(text: &str) -> ParsedInvoice {
         let vat = gross - net;
         result.net = Some(round2(net));
         result.vat = Some(round2(vat));
+    }
+
+    // If we have gross but no net and no vat_rate (or 0% rate), net = gross.
+    // Covers 0% VAT / intra-EU reverse charge invoices (Thomann PLN).
+    if result.net.is_none()
+        && let Some(gross) = result.gross
+    {
+        let zero_rate = result.vat_rate.is_some_and(|r| r == Decimal::ZERO);
+        let no_rate = result.vat_rate.is_none();
+        if zero_rate || no_rate {
+            result.net = Some(gross);
+            if result.vat.is_none() {
+                result.vat = Some(Decimal::ZERO);
+            }
+        }
     }
 
     result
@@ -192,28 +218,31 @@ static GROSS_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 fn gross_patterns() -> &'static [Regex] {
     GROSS_PATTERNS.get_or_init(|| {
         [
-            // Polish: "Brutto: 123,00 zł" / "Wartość brutto: 123,00"
-            // Uses [ \t] (not \s) to prevent matching across newlines —
-            // a product code on the next line must not be captured.
-            // Allows optional currency between label and amount for
-            // scanned receipts: "SUMA PLN 213,22".
-            r"(?i)(?:warto[śs][ćc][ \t]+)?brutto[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish: "Do zapłaty: 123,00 zł" / "Razem: 123,00" / "SUMA PLN 213,22"
+            // Tried first because "Razem/Do zapłaty" is the final total —
+            // "Brutto" can appear in discount descriptions and column headers.
             r"(?i)(?:do[ \t]+zap[łl]aty|razem|suma)[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
-            // Polish: "Całkowita cena: 439,12 zł" (Audio Partner)
-            r"(?i)całkowita[ \t]+cena[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
-            // Czech: "Celkem: 439,12 zł" (Audio Partner)
-            r"(?i)celkem[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // English: "Sub-total: 7.231,62 PLN" (Thomann)
             r"(?i)sub-?total[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // English: "Bank transfer  1.001,62 PLN" / "Cash on delivery  1.201,63 PLN"
             // (Thomann invoices without Sub-total — payment method line is the total)
             r"(?i)(?:bank[ \t]+transfer|cash[ \t]+on[ \t]+delivery)[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "Całkowita cena: 439,12 zł" (Audio Partner)
+            r"(?i)całkowita[ \t]+cena[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Czech: "Celkem: 439,12 zł" (Audio Partner)
+            r"(?i)celkem[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // German: "Gesamtbetrag: 123,00 EUR" / "Endbetrag: 123,00"
             r"(?i)(?:gesamtbetrag|endbetrag|summe)[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:eur|€)?",
-            // English: "Total EUR 155,91" / "Total: 123.45" — allows optional
-            // currency label between "Total" and the amount (MUSIC STORE).
-            r"(?i)total[ \t]*(?:eur|pln|zł)?[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})",
+            // Polish: "Brutto: 123,00 zł" / "Wartość brutto: 123,00"
+            // Tried after Razem/Do zapłaty because "brutto" can appear in
+            // discount lines like "rabatu w kwocie brutto: 169,97".
+            r"(?i)(?:warto[śs][ćc][ \t]+)?brutto[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // English: "Total EUR 155,91" / "Total: 123.45"
+            // Last resort — "Total" is very generic and can match "Total: 20W"
+            // in product descriptions. Requires the amount to have a decimal
+            // separator OR be followed by a currency unit to avoid matching
+            // non-monetary values like "20W" (watts) or "18V" (volts).
+            r"(?i)total[ \t]*(?:eur|pln|zł)?[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
         ]
         .into_iter()
         .filter_map(|p| Regex::new(p).ok())
@@ -226,13 +255,16 @@ static NET_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 fn net_patterns() -> &'static [Regex] {
     NET_PATTERNS.get_or_init(|| {
         [
-            r"(?i)(?:warto[śs][ćc]\s+)?netto\s*[:\-]?\s*([\d.\s,]+)\s*(?:z[łl]|pln|eur|usd|€|\$)?",
-            r"(?i)netto-betrag\s*[:\-]?\s*([\d.\s,]+)\s*(?:eur|€)?",
-            r"(?i)net\s*amount\s*[:\-]?\s*([\d.\s,]+)",
-            // English: "Value of goods: 7.455,28 PLN" (Thomann)
-            r"(?i)value\s+of\s+goods\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "Netto: 100,00 zł" / "Wartość netto: 100,00"
+            // Uses [ \t] (not \s) and bounded amount pattern to prevent
+            // matching across newlines into product codes on the next line.
+            r"(?i)(?:warto[śs][ćc][ \t]+)?netto[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // German: "Netto-Betrag: 100,00 EUR"
+            r"(?i)netto-betrag[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:eur|€)?",
+            // English: "Net amount: 100.00"
+            r"(?i)net[ \t]+amount[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})",
             // Polish/Czech: "Razem bez VAT: 418,7 zł" (Muziker)
-            r"(?i)razem\s+bez\s+vat\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)razem[ \t]+bez[ \t]+vat[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
         ]
         .into_iter()
         .filter_map(|p| Regex::new(p).ok())
@@ -247,14 +279,12 @@ fn vat_patterns() -> &'static [Regex] {
         [
             // Polish: "VAT 23%: 23,00" / "Kwota VAT: 23,00" — requires a colon/dash
             // separator before the amount to avoid backtracking into the rate.
-            r"(?i)(?:kwota\s+)?vat\s*(?:\d+%)?\s*[:\-]\s*([\d.\s,]+)\s*(?:z[łl]|pln|eur|usd|€|\$)?",
-            // Polish: "VAT: 23,00" — colon required
-            r"(?i)vat\s*[:\-]\s*([\d.\s,]+)\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)(?:kwota[ \t]+)?vat[ \t]*(?:\d+%)?[ \t]*[:\-][ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish gas station: "Kwota A: 23,00% 48,25" — the VAT amount
             // follows the rate on the same line (Circle K, Orlen receipts).
-            r"(?i)kwota[ \t]+[a-z][ \t]*[:\-]?[ \t]*\d+[.,]?\d*%[ \t]*([\d.\s,]+)",
+            r"(?i)kwota[ \t]+[a-z][ \t]*[:\-]?[ \t]*\d+[.,]?\d*%[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})",
             // German: "zzgl. 19% USt: 23,00 EUR" / "USt: 23,00"
-            r"(?i)(?:zzgl\.?\s*)?\d+%?\s*ust\s*[:\-]?\s*([\d.\s,]+)\s*(?:eur|€)?",
+            r"(?i)(?:zzgl\.?[ \t]*)?\d+%?[ \t]*ust[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:eur|€)?",
         ]
         .into_iter()
         .filter_map(|p| Regex::new(p).ok())
@@ -541,11 +571,14 @@ mod tests {
     #[test]
     fn parses_english_thomann_invoice_with_pln() {
         // Real Thomann invoice format: English labels, European decimals, PLN.
+        // "Value of goods" is pre-discount (7.455,28) — NOT net. The actual
+        // total is Sub-total after discount (7.231,62). For 0% VAT (intra-EU),
+        // net = gross = Sub-total.
         let text = "Invoice Nr.: 91356438\nDate: 12.08.2026\nThomann GmbH\nValue of goods: 7.455,28 PLN\n3,00 % Discount: -223,66 PLN\nSub-total: 7.231,62 PLN\nBank transfer 7.231,62 PLN";
         let parsed = parse_invoice(text);
 
         assert_eq!(parsed.gross, Some(Decimal::new(723162, 2)));
-        assert_eq!(parsed.net, Some(Decimal::new(745528, 2)));
+        assert_eq!(parsed.net, Some(Decimal::new(723162, 2)));
         assert_eq!(
             parsed.invoice_date,
             Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap())
@@ -658,5 +691,51 @@ mod tests {
 
         assert_eq!(parsed.gross, Some(Decimal::new(21322, 2)));
         assert_eq!(parsed.vat, Some(Decimal::new(3987, 2)));
+    }
+
+    #[test]
+    fn does_not_match_total_watts_as_gross() {
+        // Thomann invoice with "Total: 20W max." in product description.
+        // Must NOT match 20 as gross — real total is "Bank transfer 2.515,55".
+        let text = "Invoice Nr.: 83697691\nUSB-C and USB-A: 5V 3A; Total: 20W max.\nValue of goods: 2.515,55 PLN\nBank transfer 2.515,55 PLN";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(251555, 2)));
+    }
+
+    #[test]
+    fn does_not_match_discount_brutto_as_gross() {
+        // Shell/Hyundai invoice: "rabatu w kwocie brutto: 169,97" is a
+        // discount line, not the total. Real total is "Razem: 3 229,02 PLN".
+        let text = "Faktura VAT nr: FS-125/26/UP5\nW tym udzielono rabatu w kwocie brutto: 169,97 PLN\nRazem : 3 229,02 PLN\nDo zapłaty : 3 229,02";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(322902, 2)));
+    }
+
+    #[test]
+    fn discards_net_when_net_exceeds_gross() {
+        // Thomann with discount: Value of goods 10.207,32 > Sub-total 9.696,95.
+        // Net should be discarded and recomputed from gross.
+        let text = "Invoice Nr.: 88074418\nValue of goods: 10.207,32 PLN\n5,00 % Discount: -510,37 PLN\nSub-total: 9.696,95 PLN\nBank transfer 9.696,95 PLN";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(969695, 2)));
+        assert!(parsed.net.is_some());
+        assert!(parsed.net.unwrap() <= parsed.gross.unwrap());
+    }
+
+    #[test]
+    fn does_not_match_netto_across_newline() {
+        // Shell invoice: "Wartość netto" in column header, product code
+        // "00254" on next line. Must NOT capture 100254 as net.
+        let text = "Faktura VAT\nWartość netto\n1 00254 CZYNNOŚCI PRZEGLĄDOWE\nRazem: 3 229,02 PLN";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(322902, 2)));
+        // Net should not be 100254
+        if let Some(net) = parsed.net {
+            assert!(net < Decimal::new(100000, 0));
+        }
     }
 }
