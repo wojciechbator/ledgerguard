@@ -122,6 +122,22 @@ pub fn parse_invoice(text: &str) -> ParsedInvoice {
         }
     }
 
+    // Sanity check: if net + vat ≠ gross (beyond 0,02 rounding tolerance),
+    // the VAT was likely mis-parsed (e.g. "Cena bez VAT" matched as VAT
+    // amount, or a rate was captured as the amount). Discard the bad VAT
+    // and recompute from gross - net.
+    if let (Some(gross), Some(net), Some(vat)) = (result.gross, result.net, result.vat)
+        && (net + vat - gross).abs() > Decimal::new(2, 2)
+    {
+        if gross >= net {
+            result.vat = Some(gross - net);
+        } else {
+            // net > gross — both are suspect. Keep gross, discard net/vat.
+            result.net = None;
+            result.vat = None;
+        }
+    }
+
     result
 }
 
@@ -293,9 +309,19 @@ static VAT_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 fn vat_patterns() -> &'static [Regex] {
     VAT_PATTERNS.get_or_init(|| {
         [
-            // Polish: "VAT 23%: 23,00" / "Kwota VAT: 23,00" — requires a colon/dash
-            // separator before the amount to avoid backtracking into the rate.
-            r"(?i)(?:kwota[ \t]+)?vat[ \t]*(?:\d+%)?[ \t]*[:\-][ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "Suma podatku VAT: 150,34" / "Suma VAT: 150,34" —
+            // explicit VAT total label. Tried first because "Stawka VAT: 23 %"
+            // (rate, not amount) would otherwise match the generic pattern.
+            r"(?i)suma[ \t]+(?:podatku[ \t]+)?vat[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "Kwota VAT: 23,00" / "VAT 23%: 23,00" — requires a
+            // colon/dash separator before the amount. The "Kwota" prefix
+            // distinguishes the VAT amount from the VAT rate ("Stawka VAT").
+            r"(?i)kwota[ \t]+vat[ \t]*(?:\d+%)?[ \t]*[:\-][ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "VAT 23%: 23,00" — generic VAT label with rate prefix.
+            // The extract_vat function filters out false matches where the
+            // captured amount is followed by "%" (it's a rate, not an amount)
+            // or where "bez" precedes "VAT" (it's "Cena bez VAT" = price excl. VAT).
+            r"(?i)vat[ \t]*(?:\d+%)?[ \t]*[:\-][ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish gas station: "Kwota A: 23,00% 48,25" — the VAT amount
             // follows the rate on the same line (Circle K, Orlen receipts).
             r"(?i)kwota[ \t]+[a-z][ \t]*[:\-]?[ \t]*\d+[.,]?\d*%[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})",
@@ -442,6 +468,22 @@ fn extract_vat(text: &str) -> Option<Decimal> {
             && let Some(amount) = parse_amount(&caps[1])
             && amount > Decimal::ZERO
         {
+            // Skip false matches where the captured amount is followed by "%"
+            // — it's a VAT rate, not a VAT amount (e.g. "Stawka VAT: 23 %").
+            let match_end = caps.get(0).unwrap().end();
+            let after = text[match_end..].chars().next().unwrap_or(' ');
+            if after == '%' {
+                continue;
+            }
+
+            // Skip "Cena bez VAT: 418,7" — "bez VAT" means "excluding VAT",
+            // so the amount is the net price, not the VAT amount.
+            let match_start = caps.get(0).unwrap().start();
+            let before = &text[..match_start];
+            if before.to_lowercase().ends_with("bez ") {
+                continue;
+            }
+
             return Some(amount);
         }
     }
@@ -833,5 +875,55 @@ mod tests {
         let parsed = parse_invoice(text);
 
         assert_eq!(parsed.vendor.as_deref(), Some("Amazon EU S.à r.l."));
+    }
+
+    #[test]
+    fn does_not_match_cena_bez_vat_as_vat_amount() {
+        // Muziker: "Cena bez VAT: 418,7" means "Price excluding VAT" —
+        // the 418,7 is the net price, NOT the VAT amount. The VAT pattern
+        // must not match this. VAT should be 0 (0% rate, intra-EU).
+        let text =
+            "Muziker\nRazem bez VAT: 418,7 zł\nCena bez VAT: 418,7 zł\nVAT 0 zł\nRazem: 418,7 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(41870, 2)));
+        assert_eq!(parsed.net, Some(Decimal::new(41870, 2)));
+        // VAT must NOT be 418,70 — it should be 0.
+        assert_eq!(parsed.vat, Some(Decimal::ZERO));
+    }
+
+    #[test]
+    fn does_not_match_stawka_vat_rate_as_vat_amount() {
+        // IKEA: "Stawka VAT: 23 %" is the rate, not the amount.
+        // Real VAT amount is "Suma podatku VAT: 150,34".
+        let text = "IKEA\nFaktura VAT\nStawka VAT: 23 %\nSuma brutto: 804,00 zł\nSuma netto: 653,66 zł\nSuma podatku VAT: 150,34";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(80400, 2)));
+        assert_eq!(parsed.net, Some(Decimal::new(65366, 2)));
+        // VAT must be 150,34, not 23,00.
+        assert_eq!(parsed.vat, Some(Decimal::new(15034, 2)));
+    }
+
+    #[test]
+    fn sanity_check_recomputes_vat_when_net_plus_vat_ne_gross() {
+        // If VAT is mis-parsed (e.g. 418,70 from "Cena bez VAT") and
+        // net + vat ≠ gross, the parser should recompute vat = gross - net.
+        let text = "Faktura\nNetto: 100,00 zł\nVAT: 999,00 zł\nBrutto: 123,00 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(12300, 2)));
+        assert_eq!(parsed.net, Some(Decimal::new(10000, 2)));
+        // VAT should be recomputed: 123,00 - 100,00 = 23,00, not 999,00.
+        assert_eq!(parsed.vat, Some(Decimal::new(2300, 2)));
+    }
+
+    #[test]
+    fn parses_suma_podatku_vat_as_vat_amount() {
+        // IKEA: "Suma podatku VAT: 150,34" should be captured as VAT amount.
+        let text = "IKEA\nSuma podatku VAT: 150,34\nSuma brutto: 804,00\nSuma netto: 653,66";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.vat, Some(Decimal::new(15034, 2)));
     }
 }

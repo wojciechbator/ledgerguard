@@ -46,9 +46,10 @@ impl IngestStore {
 
     /// Upserts a ledger entry. The `UNIQUE (source, external_id)` constraint
     /// means re-processing the same PDF updates the entry rather than
-    /// duplicating it.
-    pub async fn upsert_entry(&self, entry: &LedgerEntry) -> Result<(), StoreError> {
-        sqlx::query(
+    /// duplicating it. Returns the entry ID so the caller can link the
+    /// ingested document to it without a separate SELECT.
+    pub async fn upsert_entry(&self, entry: &LedgerEntry) -> Result<Uuid, StoreError> {
+        let id: Uuid = sqlx::query_scalar(
             r#"
             INSERT INTO ledger_entries (
                 id, external_id, kind, booked_on, gross, net, vat,
@@ -61,6 +62,7 @@ impl IngestStore {
                 vat = EXCLUDED.vat,
                 counterparty = EXCLUDED.counterparty,
                 updated_at = now()
+            RETURNING id
             "#,
         )
         .bind(entry.id)
@@ -73,11 +75,11 @@ impl IngestStore {
         .bind(&entry.category)
         .bind(&entry.counterparty)
         .bind(entry.source.as_str())
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(|e| StoreError::Database(e.to_string()))?;
 
-        Ok(())
+        Ok(id)
     }
 
     /// Records an ingested document in the audit table. If `ledger_entry_id`
@@ -98,22 +100,9 @@ impl IngestStore {
         net: Option<Decimal>,
         vat: Option<Decimal>,
         vat_rate: Option<Decimal>,
+        ledger_entry_id: Option<Uuid>,
     ) -> Result<(), StoreError> {
         let id = Uuid::new_v4();
-
-        // Look up the ledger entry ID if this was classified as an invoice.
-        let ledger_entry_id: Option<Uuid> = if classification == "invoice" {
-            sqlx::query_scalar::<_, Option<Uuid>>(
-                "SELECT id FROM ledger_entries WHERE source = 'email-ocr' AND external_id = $1",
-            )
-            .bind(content_hash)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| StoreError::Database(e.to_string()))?
-            .flatten()
-        } else {
-            None
-        };
 
         sqlx::query(
             r#"

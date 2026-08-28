@@ -77,18 +77,51 @@ pub async fn run_ingest(
         errors: 0,
     };
 
-    for attachment in attachments {
-        match process_attachment(&attachment, store).await {
-            Ok(DocumentClass::Invoice) => report.invoices_imported += 1,
-            Ok(DocumentClass::BankConfirmation) => report.bank_confirmations_skipped += 1,
-            Ok(DocumentClass::Unparseable) => report.unparseable += 1,
-            Err(error) => {
-                warn!(
-                    "email ingest: failed to process {}: {error}",
-                    attachment.filename
-                );
+    // Process attachments with bounded concurrency. PDF text extraction
+    // (pdftotext) is fast (~50ms), but OCR fallback (Tesseract) takes ~10s
+    // per scanned receipt. Processing 4 at a time cuts total wall time
+    // significantly without overwhelming the CPU on the home server.
+    use tokio::task::JoinSet;
+
+    const CONCURRENCY: usize = 4;
+    let mut join_set: JoinSet<(String, Result<DocumentClass, IngestError>)> = JoinSet::new();
+    let mut attachments_iter = attachments.into_iter();
+
+    // Prime the queue with up to CONCURRENCY tasks.
+    for att in attachments_iter.by_ref().take(CONCURRENCY) {
+        let store = store.clone();
+        let filename = att.filename.clone();
+        join_set.spawn(async move {
+            let result = process_attachment(&att, &store).await;
+            (filename, result)
+        });
+    }
+
+    // As each task completes, spawn the next one.
+    while let Some(res) = join_set.join_next().await {
+        match res {
+            Ok((filename, result)) => match result {
+                Ok(DocumentClass::Invoice) => report.invoices_imported += 1,
+                Ok(DocumentClass::BankConfirmation) => report.bank_confirmations_skipped += 1,
+                Ok(DocumentClass::Unparseable) => report.unparseable += 1,
+                Err(error) => {
+                    warn!("email ingest: failed to process {filename}: {error}");
+                    report.errors += 1;
+                }
+            },
+            Err(join_err) => {
+                warn!("email ingest: task panicked: {join_err}");
                 report.errors += 1;
             }
+        }
+
+        if let Some(att) = attachments_iter.next() {
+            let store = store.clone();
+            let filename = att.filename.clone();
+            join_set.spawn(async move {
+                let result = process_attachment(&att, &store).await;
+                (filename, result)
+            });
         }
     }
 
@@ -134,6 +167,7 @@ async fn process_attachment(
                     None,
                     None,
                     None,
+                    None,
                 )
                 .await?;
             info!(
@@ -161,6 +195,7 @@ async fn process_attachment(
                         Some(&extracted_text),
                         parsed.vendor.as_deref(),
                         parsed.invoice_date,
+                        None,
                         None,
                         None,
                         None,
@@ -201,7 +236,7 @@ async fn process_attachment(
                 source,
             };
 
-            store.upsert_entry(&entry).await?;
+            let entry_id = store.upsert_entry(&entry).await?;
 
             store
                 .record_document(
@@ -218,6 +253,7 @@ async fn process_attachment(
                     parsed.net,
                     parsed.vat,
                     parsed.vat_rate,
+                    Some(entry_id),
                 )
                 .await?;
 
@@ -238,6 +274,7 @@ async fn process_attachment(
                     &attachment.email_recipient,
                     "unparseable",
                     Some(&extracted_text),
+                    None,
                     None,
                     None,
                     None,
