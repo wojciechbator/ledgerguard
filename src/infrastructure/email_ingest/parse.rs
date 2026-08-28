@@ -218,15 +218,27 @@ static GROSS_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 fn gross_patterns() -> &'static [Regex] {
     GROSS_PATTERNS.get_or_init(|| {
         [
+            // Polish: "Razem do zapłaty: 123,00 zł" — combined phrase where
+            // "do zapłaty" sits between "Razem" and the amount. Without this,
+            // the single-word "razem" pattern matches but can't reach the
+            // amount past "do zapłaty" (Amazon, Fakturownia invoices).
+            r"(?i)razem[ \t]+do[ \t]+zap[łlt]aty[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "Suma faktury: 387,01 zł" — "faktury" between "suma"
+            // and the amount (Amazon invoice).
+            r"(?i)suma[ \t]+faktury[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish gas station: "RAZEM 187,24 43,06 230,30" — three amounts
+            // on one line (net, VAT, gross). Capture the last one as gross.
+            // Tried BEFORE single-word "razem" to avoid matching the net.
+            r"(?i)razem[ \t]+\d{1,3}(?:[. ]\d{3})*,\d{1,2}[ \t]+\d{1,3}(?:[. ]\d{3})*,\d{1,2}[ \t]+(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish: "Do zapłaty: 123,00 zł" / "Razem: 123,00" / "SUMA PLN 213,22"
-            // Tried first because "Razem/Do zapłaty" is the final total —
-            // "Brutto" can appear in discount descriptions and column headers.
-            r"(?i)(?:do[ \t]+zap[łl]aty|razem|suma)[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // OCR tolerance: "zaptaty" (t misread for ł) is handled by [łlt].
+            r"(?i)(?:do[ \t]+zap[łlt]aty|razem|suma)[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // English: "Sub-total: 7.231,62 PLN" (Thomann)
             r"(?i)sub-?total[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
-            // English: "Bank transfer  1.001,62 PLN" / "Cash on delivery  1.201,63 PLN"
-            // (Thomann invoices without Sub-total — payment method line is the total)
-            r"(?i)(?:bank[ \t]+transfer|cash[ \t]+on[ \t]+delivery)[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // English: "Bank transfer 1.001,62 PLN" / "Cash on delivery" /
+            // "Mastercard 180,49 PLN" / "Visa" / "PayPal" / "Credit card"
+            // (Thomann invoices without Sub-total — payment method is the total)
+            r"(?i)(?:bank[ \t]+transfer|cash[ \t]+on[ \t]+delivery|mastercard|visa|paypal|credit[ \t]+card)[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish: "Całkowita cena: 439,12 zł" (Audio Partner)
             r"(?i)całkowita[ \t]+cena[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Czech: "Celkem: 439,12 zł" (Audio Partner)
@@ -337,8 +349,13 @@ static VENDOR_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 fn vendor_patterns() -> &'static [Regex] {
     VENDOR_PATTERNS.get_or_init(|| {
         [
-            // Polish: "Sprzedawca: Thomann GmbH"
+            // Polish: "Sprzedawca: Thomann GmbH" (with colon)
             r"(?i)sprzedawca\s*[:\-]\s*(.+)",
+            // Polish: "Sprzedawca Amazon EU S.à r.l." (without colon —
+            // Amazon and some KSeF invoices). The vendor name follows
+            // "Sprzedawca" with 1+ spaces. The extract_vendor function
+            // filters out "Nabywca" (column header case).
+            r"(?i)sprzedawca[ \t]+(\S[^\n]*)",
             // German: "Verkäufer: Thomann GmbH" / "Rechnung von: Thomann"
             r"(?i)(?:verkäufer|rechnung\s+von)\s*[:\-]\s*(.+)",
             // English: "Seller: Thomann GmbH" / "Vendor: Thomann"
@@ -376,9 +393,15 @@ static KNOWN_VENDORS: &[&str] = &[
     "music store",
     "musicstore",
     "audio partner",
+    "audio complex",
     "muziker",
     "mol polska",
     "somacare",
+    "elbah",
+    "omega",
+    "koi metal",
+    "fakturownia",
+    "inFakt",
 ];
 
 fn extract_gross(text: &str) -> Option<Decimal> {
@@ -476,6 +499,13 @@ fn extract_vendor(text: &str) -> Option<String> {
             let raw = caps[1].trim();
             // Take the first line only — the vendor name is usually on one line.
             let first_line = raw.lines().next()?.trim();
+            // Skip "Nabywca" — it's a column header, not a vendor name.
+            // This happens when "Sprzedawca  Nabywca" is on one line and
+            // the regex captures "Nabywca" as the vendor.
+            let lower = first_line.to_lowercase();
+            if lower == "nabywca" || lower.starts_with("nabywca ") {
+                continue;
+            }
             if !first_line.is_empty() && first_line.len() <= 200 {
                 return Some(first_line.to_owned());
             }
@@ -737,5 +767,62 @@ mod tests {
         if let Some(net) = parsed.net {
             assert!(net < Decimal::new(100000, 0));
         }
+    }
+
+    #[test]
+    fn parses_razem_do_zaplaty_combined_phrase() {
+        // Amazon invoice: "Razem do zapłaty 387,01 zł" — "do zapłaty"
+        // sits between "Razem" and the amount.
+        let text = "Faktura\nSprzedawca Amazon EU S.à r.l.\nRazem do zapłaty 387,01 zł\nSuma faktury 387,01 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(38701, 2)));
+    }
+
+    #[test]
+    fn parses_suma_faktury_combined_phrase() {
+        // Amazon invoice: "Suma faktury 387,01 zł"
+        let text = "Faktura\nSuma faktury 387,01 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(38701, 2)));
+    }
+
+    #[test]
+    fn parses_thomann_mastercard_payment() {
+        // Thomann with Mastercard payment (no Sub-total line).
+        let text = "Invoice Nr.: 87491446\nValue of goods: 180,49 PLN\nMastercard 180,49 PLN";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(18049, 2)));
+    }
+
+    #[test]
+    fn parses_razem_with_three_amounts_takes_last() {
+        // Gas station: "RAZEM 187,24 43,06 230,30" — net, VAT, gross.
+        // Must capture 230,30 (the last = brutto), not 187,24 (netto).
+        let text = "ELBAH Sp. z o.o.\nVAT w.netto w.VAT u.brutto\nRAZEM 187,24 43,06 230,30\nDo zaptaty PLN";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(23030, 2)));
+    }
+
+    #[test]
+    fn parses_ocr_zaptaty_as_zaplaty() {
+        // OCR garbled "zapłaty" to "zaptaty" (t misread for ł).
+        let text = "Faktura\nDo zaptaty: 100,00 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(10000, 2)));
+    }
+
+    #[test]
+    fn extracts_vendor_without_colon() {
+        // Amazon: "Sprzedawca Amazon EU S.à r.l." (no colon, 2+ spaces).
+        let text =
+            "Faktura\nSprzedawca Amazon EU S.à r.l.\nNIP PL5262907815\nRazem do zapłaty 387,01 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.vendor.as_deref(), Some("Amazon EU S.à r.l."));
     }
 }
