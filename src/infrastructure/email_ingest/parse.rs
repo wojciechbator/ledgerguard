@@ -392,7 +392,7 @@ static KNOWN_VENDORS: &[&str] = &[
     "ikea",
     "castorama",
     "leroy merlin",
-    "ob",
+    "obi",
     "psb",
     "music store",
     "musicstore",

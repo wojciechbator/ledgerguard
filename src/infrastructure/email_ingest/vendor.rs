@@ -73,6 +73,7 @@ const VENDOR_PATTERNS: &[(&str, &str, &str)] = &[
     (r"play\b", "Play", "telecom"),
     (r"plus\b", "Plus", "telecom"),
     (r"t-mobile|tmobile", "T-Mobile", "telecom"),
+    (r"netia", "Netia", "telecom"),
     // Utilities
     (r"pge\b|polska\s*energetyka", "PGE", "utilities"),
     (r"pgnig|pgn\s*ig|polski\s*gaz", "PGNiG", "utilities"),
