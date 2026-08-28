@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'">
+  <meta name="description" content="LedgerGuard — kontrola przepływów pieniężnych. Jedna liczba, która ma znaczenie: ile możesz bezpiecznie wydać.">
+  <link rel="icon" href="data:,">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'">
   <title>LedgerGuard</title>
   <style>
     :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #f5f7fb; background: #0b0d12; }
@@ -102,6 +104,17 @@
       </details>
     </article>
 
+    <article class="card">
+      <h2>Koszty z email-OCR</h2>
+      <p class="notice" style="margin:0 0 10px">Faktury kosztowe przesłane na dok.saldeo.pl, rozpoznane automatycznie z załączników PDF.</p>
+      <div class="actions" style="margin-bottom:12px">
+        <button id="ingest-email" class="secondary">Uruchom ingest teraz</button>
+        <button id="load-costs" class="secondary">Odśwież podsumowanie</button>
+      </div>
+      <div class="notice" id="ingest-result"></div>
+      <div id="costs-summary"></div>
+    </article>
+
     <aside class="card side">
       <h2>Czy moge to kupic?</h2>
       <p class="notice" style="margin:0 0 10px">Porownuje planowany wydatek z budzetem kosztow i tym, co juz tego miesiaca wydano.</p>
@@ -145,7 +158,7 @@
         <label>Bearer token <input id="token" type="password" autocomplete="off" placeholder="LEDGERGUARD_API_TOKEN"></label>
         <button id="connect" class="secondary">Połącz</button>
       </div>
-      <div class="notice">Token trafia wyłącznie do <code>sessionStorage</code> tej karty i nie jest wysyłany nigdzie poza tym serwisem.</div>
+      <div class="notice">Token trafia wyłącznie do <code>localStorage</code> tej przeglądarki i nie jest wysyłany nigdzie poza tym serwisem. <button id="forget-token" class="secondary" style="display:inline;width:auto;padding:2px 8px;font-size:11px;margin-left:4px">Zapomnij token</button></div>
       <button id="sync" class="secondary" style="margin-top:12px">Synchronizuj bieżący miesiąc</button>
       <div class="notice" id="sync-result"></div>
     </aside>
@@ -157,7 +170,13 @@
   const ids = ["available_cash","committed_costs","tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer","planned_spend","tight_threshold"];
   const $ = id => document.getElementById(id);
   const tokenInput = $("token");
-  tokenInput.value = sessionStorage.getItem("ledgerguard_token") || "";
+  tokenInput.value = localStorage.getItem("ledgerguard_token") || "";
+
+  // Device token takes priority over the bootstrap token in the input field.
+  // Once exchanged, the device token is persisted in localStorage and used
+  // for all subsequent API calls — the bootstrap token stays in the input
+  // only as a fallback for re-issuing if the device token is revoked.
+  let activeToken = localStorage.getItem("ledgerguard_device_token") || "";
 
   let remembered = null;
   try {
@@ -180,7 +199,7 @@
   });
   const headers = () => {
     const h = {"content-type":"application/json"};
-    const token = tokenInput.value.trim();
+    const token = activeToken || tokenInput.value.trim();
     if (token) h.authorization = `Bearer ${token}`;
     return h;
   };
@@ -192,6 +211,24 @@
   }
   const format = value => `${value} zł`;
   const decisionClass = value => value === "healthy" ? "ok" : value === "tight" ? "warn" : "bad";
+
+  // Derive a short human-readable label from the user agent so the device
+  // list in the admin API is useful for identifying which session is which.
+  function deviceLabel() {
+    const ua = navigator.userAgent;
+    const browser = /Firefox\//.test(ua) ? "Firefox"
+      : /Edg\//.test(ua) ? "Edge"
+      : /Chrome\//.test(ua) ? "Chrome"
+      : /Safari\//.test(ua) ? "Safari"
+      : "Browser";
+    const os = /Mac OS X/.test(ua) ? "macOS"
+      : /Windows/.test(ua) ? "Windows"
+      : /Android/.test(ua) ? "Android"
+      : /iPhone|iPad/.test(ua) ? "iOS"
+      : /Linux/.test(ua) ? "Linux"
+      : "unknown";
+    return `${browser} on ${os}`;
+  }
 
   async function status() {
     try {
@@ -236,7 +273,51 @@
     container.replaceChildren(first, safe, headroom);
   }
 
-  $("connect").onclick = async () => { sessionStorage.setItem("ledgerguard_token", tokenInput.value.trim()); await status(); };
+  $("connect").onclick = async () => {
+    const bootstrap = tokenInput.value.trim();
+    if (!bootstrap) { $("sync-result").textContent = "Wpisz token najpierw."; return; }
+    localStorage.setItem("ledgerguard_token", bootstrap);
+    $("sync-result").textContent = "Łączę...";
+
+    // Exchange the bootstrap token for a per-device session token. The
+    // device token is persisted in localStorage and used for all subsequent
+    // calls — the bootstrap token is only needed again if the device token
+    // is revoked. If the exchange fails (e.g. auth disabled), fall back to
+    // using the bootstrap token directly.
+    try {
+      const label = deviceLabel();
+      const resp = await fetch("/v1/auth/device", {
+        method: "POST",
+        headers: { "content-type": "application/json", "authorization": `Bearer ${bootstrap}` },
+        body: JSON.stringify({ label })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        activeToken = data.token;
+        localStorage.setItem("ledgerguard_device_token", data.token);
+      } else {
+        activeToken = bootstrap;
+      }
+    } catch (_) {
+      activeToken = bootstrap;
+    }
+
+    try {
+      await Promise.all([status(), loadMonth(), loadCosts()]);
+      $("sync-result").textContent = activeToken !== bootstrap
+        ? "✓ Połączono (token urządzenia aktywny)."
+        : "✓ Połączono z API.";
+    } catch (e) {
+      $("sync-result").textContent = "Błąd: " + e.message;
+    }
+  };
+  $("forget-token").onclick = () => {
+    localStorage.removeItem("ledgerguard_token");
+    localStorage.removeItem("ledgerguard_device_token");
+    activeToken = "";
+    tokenInput.value = "";
+    $("sync-result").textContent = "Token usunięty z tej przeglądarki.";
+  };
   $("remember").onclick = () => {
     const values = {}; ids.forEach(id => values[id] = $(id).value);
     localStorage.setItem("ledgerguard_planner", JSON.stringify(values));
@@ -308,8 +389,72 @@
     } catch (e) { $("manual-result").textContent = e.message; }
   };
 
-  loadMonth();
-  status();
+  async function loadCosts() {
+    try {
+      const summary = await api("/v1/costs/summary");
+      const el = $("costs-summary");
+      el.innerHTML = "";
+      if (!summary.by_vendor.length) {
+        el.innerHTML = "<p class='notice'>Brak kosztów email-OCR w tym miesiącu.</p>";
+        return;
+      }
+      const total = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
+      const totalNet = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_net || 0), 0);
+      const totalVat = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_vat || 0), 0);
+      let html = `<table style="width:100%;border-collapse:collapse;margin-top:8px"><thead><tr><th style="text-align:left">Dostawca</th><th>Faktur</th><th>Netto</th><th>VAT</th><th>Brutto</th></tr></thead><tbody>`;
+      for (const v of summary.by_vendor) {
+        html += `<tr><td>${v.vendor}</td><td style="text-align:center">${v.invoice_count}</td><td>${format(v.total_net || "0")}</td><td>${format(v.total_vat || "0")}</td><td><strong>${format(v.total_gross)}</strong></td></tr>`;
+      }
+      html += `</tbody><tfoot><tr style="border-top:1px solid #292f3d"><td><strong>Razem</strong></td><td></td><td><strong>${format(totalNet.toFixed(2))}</strong></td><td><strong>${format(totalVat.toFixed(2))}</strong></td><td><strong>${format(total.toFixed(2))}</strong></td></tr></tfoot></table>`;
+      if (summary.by_category.length) {
+        html += `<h3 style="margin-top:16px">Kategorie</h3><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">`;
+        for (const c of summary.by_category) {
+          html += `<span class="badge" style="background:#1e2533;padding:4px 10px;border-radius:4px">${c.category}: ${format(c.total_gross)}</span>`;
+        }
+        html += `</div>`;
+      }
+      el.innerHTML = html;
+    } catch (e) {
+      $("costs-summary").innerHTML = `<p class="notice">Błąd: ${e.message}</p>`;
+    }
+  }
+
+  $("ingest-email").onclick = async () => {
+    $("ingest-result").textContent = "Uruchamiam w tle…";
+    try {
+      const r = await api("/v1/ingest/email", { method: "POST" });
+      $("ingest-result").textContent = r.message || "Ingestion started";
+      // Poll for results every 5s, up to 2 minutes
+      let polls = 0;
+      const maxPolls = 24;
+      const poll = async () => {
+        polls++;
+        try {
+          await loadCosts();
+          await loadMonth();
+          const docs = await api("/v1/ingest/documents?limit=5");
+          if (docs.documents && docs.documents.length > 0) {
+            $("ingest-result").textContent = `Zaladowano ${docs.documents.length} dokumentów. Koszty zaktualizowane.`;
+          }
+          if (polls < maxPolls) setTimeout(poll, 5000);
+        } catch (e) { /* ignore poll errors */ }
+      };
+      setTimeout(poll, 5000);
+    } catch (e) { $("ingest-result").textContent = `Błąd: ${e.message}`; }
+  };
+  $("load-costs").onclick = loadCosts;
+
+  // Auto-load data if a device token or bootstrap token is already stored —
+  // avoids 401 console errors on first visit when no credentials are available.
+  const hasToken = activeToken || localStorage.getItem("ledgerguard_token");
+  if (hasToken) {
+    loadMonth();
+    loadCosts();
+    status();
+  } else {
+    $("month-detail").textContent = "Wpisz token API w sekcji „Połączenie”, aby załadować dane.";
+    $("costs-summary").innerHTML = "<p class='notice'>Połącz się z API, aby zobaczyć koszty.</p>";
+  }
 })();
 </script>
 </body>
