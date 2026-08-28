@@ -107,6 +107,10 @@ pub struct BudgetSettings {
     pub monthly_cost_budget: Option<Money>,
     /// Remaining-budget share (basis points) at which the verdict turns Tight.
     pub tight_share_basis_points: u16,
+    /// Expected monthly income (gross PLN). Used as a default projection when
+    /// actual revenue entries for the month are sparse or absent. Defaults to
+    /// 26 500 PLN — override with `LEDGERGUARD_MONTHLY_INCOME`.
+    pub monthly_income: Money,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +122,26 @@ pub struct AccountingSettings {
     pub wfirma: WfirmaSettings,
 }
 
+/// Configuration for the email-OCR cost ingestion pipeline.
+///
+/// The pipeline reads sent emails from a Gmail account, extracts PDF
+/// attachments (invoices sent to the SaldeoSMART document inbox), OCRs
+/// them, classifies them (invoice vs. bank confirmation), parses the
+/// amounts, and upserts them into the ledger.
+#[derive(Debug, Clone)]
+pub struct EmailIngestSettings {
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub imap_username: Option<String>,
+    pub imap_password: Option<SecretString>,
+    /// IMAP folder containing sent emails. Gmail uses "[Gmail]/Sent Mail".
+    pub sent_folder: String,
+    /// Recipient filter — only emails TO this address are processed.
+    pub recipient_filter: String,
+    /// Subject filter — only emails with this substring in the subject are processed.
+    pub subject_filter: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub bind_addr: SocketAddr,
@@ -125,6 +149,7 @@ pub struct Config {
     pub runtime: RuntimeSettings,
     pub budget: BudgetSettings,
     pub accounting: AccountingSettings,
+    pub email_ingest: EmailIngestSettings,
 }
 
 impl Config {
@@ -167,6 +192,16 @@ impl Config {
                     anyhow::anyhow!("invalid LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS {raw:?}: {error}")
                 })?,
                 None => 1_000,
+            },
+            monthly_income: match optional_env("LEDGERGUARD_MONTHLY_INCOME") {
+                Some(raw) => Decimal::from_str(&raw)
+                    .ok()
+                    .and_then(|value| Money::non_negative(value).ok())
+                    .with_context(|| {
+                        format!("LEDGERGUARD_MONTHLY_INCOME must be a non-negative decimal, got {raw:?}")
+                    })?,
+                None => Money::non_negative(Decimal::new(2_650_000, 2))
+                    .expect("26500.00 is a valid Money"),
             },
         };
         if let Some(budget) = budget.monthly_cost_budget {
@@ -212,6 +247,21 @@ impl Config {
                     app_key: SecretString::from_env_or_file("WFIRMA_APP_KEY")?,
                     company_id: optional_env("WFIRMA_COMPANY_ID"),
                 },
+            },
+            email_ingest: EmailIngestSettings {
+                imap_host: optional_env("LEDGERGUARD_IMAP_HOST")
+                    .unwrap_or_else(|| "imap.gmail.com".to_owned()),
+                imap_port: optional_env("LEDGERGUARD_IMAP_PORT")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(993),
+                imap_username: optional_env("LEDGERGUARD_IMAP_USERNAME"),
+                imap_password: SecretString::from_env_or_file("LEDGERGUARD_IMAP_PASSWORD")?,
+                sent_folder: optional_env("LEDGERGUARD_IMAP_SENT_FOLDER")
+                    .unwrap_or_else(|| "[Gmail]/Sent Mail".to_owned()),
+                recipient_filter: optional_env("LEDGERGUARD_INGEST_RECIPIENT")
+                    .unwrap_or_else(|| "wbator@dok.saldeo.pl".to_owned()),
+                subject_filter: optional_env("LEDGERGUARD_INGEST_SUBJECT")
+                    .unwrap_or_else(|| "(5767)".to_owned()),
             },
         })
     }
@@ -285,5 +335,13 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn default_monthly_income_is_26500_pln() {
+        // The default is baked in as Decimal::new(2_650_000, 2) = 26500.00.
+        let default = Money::non_negative(Decimal::new(2_650_000, 2)).unwrap();
+        assert_eq!(default.amount(), Decimal::new(2_650_000, 2));
+        assert_eq!(default.amount().to_string(), "26500");
     }
 }

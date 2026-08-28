@@ -143,6 +143,39 @@ Simulate a purchase by adding `purchase_gross` to the same request shape and POS
 
 Money is represented with decimal arithmetic and transported as decimal strings, never binary floating point. Negative money values cannot be introduced through JSON deserialization.
 
+## Per-device session tokens
+
+The static `LEDGERGUARD_API_TOKEN` is the bootstrap credential. Each device can exchange it for a unique, revocable session token so the bootstrap token doesn't need to be re-entered on every browser/tab restart.
+
+Issue a device token (requires the bootstrap token):
+
+```bash
+curl -s http://127.0.0.1:8088/v1/auth/device \
+  -H 'authorization: Bearer YOUR_BOOTSTRAP_TOKEN' \
+  -H 'content-type: application/json' \
+  -d '{ "label": "Chrome on macOS" }'
+```
+
+The response returns a `token` (shown once) and session metadata. Use the device token as the `Bearer` credential for all subsequent `/v1/*` calls — except `/v1/auth/device` itself, which only accepts the bootstrap token.
+
+List active device sessions:
+
+```bash
+curl -s http://127.0.0.1:8088/v1/auth/device \
+  -H 'authorization: Bearer YOUR_BOOTSTRAP_TOKEN'
+```
+
+Revoke a device session by id:
+
+```bash
+curl -s -X DELETE http://127.0.0.1:8088/v1/auth/device/SESSION_UUID \
+  -H 'authorization: Bearer YOUR_BOOTSTRAP_TOKEN'
+```
+
+The dashboard automatically exchanges the bootstrap token for a device token on first connect and persists it in `localStorage`. The "Zapomnij token" button clears both the bootstrap and device tokens from the browser.
+
+Device tokens are long-lived (no expiry/rotation) and stored as SHA-256 digests in PostgreSQL — a database leak does not expose live sessions.
+
 ## Accounting sync contract
 
 Provider adapters return neutral accounting records rather than internal ledger entities. Before persistence, every provider batch is checked for bounded non-empty external IDs, duplicate IDs and strict requested-month boundaries. The application then assigns internal identity and trusted provider provenance.

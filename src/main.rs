@@ -11,7 +11,11 @@ use anyhow::{Context, Result, bail, ensure};
 use ledgerguard::{
     api::{ApiAuth, AppState, router},
     config::Config,
-    infrastructure::{accounting::build_accounting_source, postgres::PgLedgerRepository},
+    infrastructure::{
+        accounting::build_accounting_source,
+        email_ingest::{self, store::IngestStore},
+        postgres::PgLedgerRepository,
+    },
 };
 use sqlx::{migrate::Migrator, postgres::PgPoolOptions};
 use tokio::net::TcpListener;
@@ -69,12 +73,23 @@ async fn main() -> Result<()> {
         .context("failed to apply database migrations")?;
 
     let ledger = Arc::new(PgLedgerRepository::new(pool.clone()));
+
+    // Email ingest is enabled only when IMAP credentials are present.
+    let email_ingest = if config.email_ingest.imap_username.is_some()
+        && config.email_ingest.imap_password.is_some()
+    {
+        Some(config.email_ingest.clone())
+    } else {
+        None
+    };
+
     let state = AppState {
         pool,
         accounting,
         ledger,
         live_sync_enabled: config.runtime.live_sync_enabled,
-        budget: config.budget.clone(),
+        budget: std::sync::Arc::new(std::sync::RwLock::new(config.budget.clone())),
+        email_ingest,
     };
     let auth = match config.runtime.api_token.as_ref() {
         Some(token) => ApiAuth::Bearer(Arc::from(token.expose())),
@@ -120,6 +135,12 @@ fn run_utility_command() -> Result<bool> {
             run_healthcheck()?;
             Ok(true)
         }
+        "ingest-email" => {
+            init_tracing();
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(run_email_ingest())?;
+            Ok(true)
+        }
         _ => bail!("unknown command: {command}"),
     }
 }
@@ -143,6 +164,63 @@ fn run_healthcheck() -> Result<()> {
         response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"),
         "LedgerGuard health endpoint did not return HTTP 200"
     );
+    Ok(())
+}
+
+async fn run_email_ingest() -> Result<()> {
+    let config = Config::from_env()?;
+
+    let username = config
+        .email_ingest
+        .imap_username
+        .as_ref()
+        .context("LEDGERGUARD_IMAP_USERNAME is required for email ingestion")?;
+    let password = config
+        .email_ingest
+        .imap_password
+        .as_ref()
+        .context("LEDGERGUARD_IMAP_PASSWORD is required for email ingestion")?;
+
+    let pool = PgPoolOptions::new()
+        .min_connections(1)
+        .max_connections(2)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(config.database_url.expose())
+        .await
+        .context("failed to connect to PostgreSQL")?;
+
+    let migrations_dir =
+        env::var("LEDGERGUARD_MIGRATIONS_DIR").unwrap_or_else(|_| "migrations".to_owned());
+    let migrator = Migrator::new(Path::new(&migrations_dir))
+        .await
+        .with_context(|| format!("failed to load database migrations from {migrations_dir}"))?;
+    migrator
+        .run(&pool)
+        .await
+        .context("failed to apply database migrations")?;
+
+    let store = IngestStore::new(pool);
+    let imap_config = email_ingest::imap_client::ImapConfig {
+        host: config.email_ingest.imap_host.clone(),
+        port: config.email_ingest.imap_port,
+        username: username.clone(),
+        password: password.expose().to_owned(),
+        sent_folder: config.email_ingest.sent_folder.clone(),
+        recipient_filter: config.email_ingest.recipient_filter.clone(),
+        subject_filter: config.email_ingest.subject_filter.clone(),
+    };
+
+    let report = email_ingest::run_ingest(imap_config, &store).await?;
+
+    info!(
+        "email ingest report: {} scanned, {} invoices imported, {} bank confirmations skipped, {} unparseable, {} errors",
+        report.scanned,
+        report.invoices_imported,
+        report.bank_confirmations_skipped,
+        report.unparseable,
+        report.errors
+    );
+
     Ok(())
 }
 
