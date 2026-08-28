@@ -975,7 +975,7 @@ async fn costs_trends(
 struct TaxEstimateResponse {
     /// PIT estimate: pit_rate * monthly_income
     pit_estimate: String,
-    /// VAT estimate: vat_rate * sum(net costs this month)
+    /// VAT estimate: output VAT extracted from gross income
     vat_estimate: String,
     /// Fixed monthly ZUS contribution
     zus_estimate: String,
@@ -1017,9 +1017,13 @@ async fn tax_estimate(
     let pit_estimate =
         monthly_income * Decimal::from(tax.pit_rate_basis_points) / Decimal::from(10_000);
 
-    // VAT: rate * net costs (VAT charged on expenses that can be deducted)
-    let vat_estimate =
-        summary.costs.amount() * Decimal::from(tax.vat_rate_basis_points) / Decimal::from(10_000);
+    // VAT: output VAT on gross income (the portion of revenue that is VAT).
+    // For a 23% rate: vat = income * 23 / 123. Input VAT on costs is
+    // deductible but tracked separately — this reserve covers the gross
+    // output VAT liability before deductions are applied.
+    let vat_basis = Decimal::from(tax.vat_rate_basis_points);
+    let vat_divisor = Decimal::from(10_000) + vat_basis;
+    let vat_estimate = monthly_income * vat_basis / vat_divisor;
 
     let zus = tax.zus_monthly.amount();
     let health = tax.health_insurance_monthly.amount();

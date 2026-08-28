@@ -760,8 +760,10 @@
           $("zus_reserve").value = parseFloat(t.zus_estimate).toFixed(2);
           $("health_reserve").value = parseFloat(t.health_insurance).toFixed(2);
           updateReservesTotal();
-          taxEstimateLoaded = true;
         }
+        // Mark as loaded regardless of whether we filled — avoids
+        // re-checking on every subsequent call when user has values.
+        taxEstimateLoaded = true;
       }
 
       // Always update the display breakdown
