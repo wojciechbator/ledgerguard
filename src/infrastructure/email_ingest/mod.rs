@@ -78,12 +78,13 @@ pub async fn run_ingest(
     };
 
     // Process attachments with bounded concurrency. PDF text extraction
-    // (pdftotext) is fast (~50ms), but OCR fallback (Tesseract) takes ~10s
-    // per scanned receipt. Processing 4 at a time cuts total wall time
-    // significantly without overwhelming the CPU on the home server.
+    // (pdftotext) is fast (~50ms), but OCR fallback (Tesseract + pdftoppm
+    // at 400 DPI) takes ~10s per scanned receipt and generates large temp
+    // PNG files. Processing 2 at a time cuts wall time without overflowing
+    // the container's temp storage or memory.
     use tokio::task::JoinSet;
 
-    const CONCURRENCY: usize = 4;
+    const CONCURRENCY: usize = 2;
     let mut join_set: JoinSet<(String, Result<DocumentClass, IngestError>)> = JoinSet::new();
     let mut attachments_iter = attachments.into_iter();
 
