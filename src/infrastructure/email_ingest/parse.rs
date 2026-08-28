@@ -406,7 +406,10 @@ static KNOWN_VENDORS: &[&str] = &[
     "koi metal",
     "jakub kulikowski",
     "fakturownia",
-    "inFakt",
+    "infakt",
+    "netia",
+    "morele",
+    "inpost",
 ];
 
 fn extract_gross(text: &str) -> Option<Decimal> {
@@ -505,10 +508,11 @@ fn extract_vendor(text: &str) -> Option<String> {
             // Take the first line only — the vendor name is usually on one line.
             let first_line = raw.lines().next()?.trim();
             // Skip "Nabywca" — it's a column header, not a vendor name.
-            // This happens when "Sprzedawca  Nabywca" is on one line and
-            // the regex captures "Nabywca" as the vendor.
+            // This happens when "Sprzedawca:  Nabywca:  WB Soft..." is on
+            // one line and the regex captures "Nabywca:..." as the vendor.
+            // The real vendor is on the next line.
             let lower = first_line.to_lowercase();
-            if lower == "nabywca" || lower.starts_with("nabywca ") {
+            if lower.starts_with("nabywca") {
                 continue;
             }
             if !first_line.is_empty() && first_line.len() <= 200 {
