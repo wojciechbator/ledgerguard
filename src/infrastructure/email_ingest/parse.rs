@@ -232,7 +232,11 @@ fn gross_patterns() -> &'static [Regex] {
             r"(?i)razem[ \t]+\d{1,3}(?:[. ]\d{3})*,\d{1,2}[ \t]+\d{1,3}(?:[. ]\d{3})*,\d{1,2}[ \t]+(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish: "Do zapłaty: 123,00 zł" / "Razem: 123,00" / "SUMA PLN 213,22"
             // OCR tolerance: "zaptaty" (t misread for ł) is handled by [łlt].
-            r"(?i)(?:do[ \t]+zap[łlt]aty|razem|suma)[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Also handles em dash "—" as separator (OCR from scanned receipts).
+            r"(?i)(?:do[ \t]+zap[łlt]aty|razem|suma)[ \t]*[:\-—]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish scanned receipt: "Do zapłaty PLN —\n330,90" — amount on
+            // next line. Allows one newline between label and amount.
+            r"(?i)do[ \t]+zap[łlt]aty[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*[:\-—]?[ \t]*\n[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // English: "Sub-total: 7.231,62 PLN" (Thomann)
             r"(?i)sub-?total[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // English: "Bank transfer 1.001,62 PLN" / "Cash on delivery" /
@@ -400,6 +404,7 @@ static KNOWN_VENDORS: &[&str] = &[
     "elbah",
     "omega",
     "koi metal",
+    "jakub kulikowski",
     "fakturownia",
     "inFakt",
 ];
