@@ -880,6 +880,22 @@ async fn costs_summary(
     let year = query.year.unwrap_or(now.year());
     let month = query.month.unwrap_or(now.month());
 
+    // Validate month range — reject invalid values early.
+    if !(1..=12).contains(&month) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_month",
+            "month must be between 1 and 12",
+        ));
+    }
+    if !(2000..=2100).contains(&year) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_year",
+            "year must be between 2000 and 2100",
+        ));
+    }
+
     let store = IngestStore::new(state.pool.clone());
 
     let by_vendor = store
