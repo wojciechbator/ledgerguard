@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Sprawdź ceny produktów Thomann i oceni czy zakup mieści się w budżecie miesięcznym. Konwertuje linki na afiliacyjne automatycznie.">
+<link rel="icon" href="data:,">
+<title>Thomann — LedgerGuard</title>
+<style>
+:root{--bg:#0f1117;--card:#171b26;--border:#292f3d;--text:#e0e4ed;--muted:#a0a8bc;--accent:#2563eb;--accent-hover:#1d4ed8;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,system-ui,sans-serif;padding:20px;max-width:900px;margin:0 auto}
+h1{font-size:1.5rem;margin-bottom:4px}
+h2{font-size:1.1rem;margin:20px 0 8px}
+.notice{color:var(--muted);font-size:.85rem;margin:4px 0}
+textarea{width:100%;height:120px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:12px;font:14px/1.5 monospace;resize:vertical}
+textarea:focus{outline:none;border-color:var(--accent)}
+button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:.9rem;cursor:pointer;margin-top:10px}
+button:hover{background:var(--accent-hover)}
+button:disabled{opacity:.4;cursor:wait}
+button.secondary{background:var(--card);border:1px solid var(--border);color:var(--text)}
+.actions{display:flex;gap:8px;align-items:center}
+.result{margin-top:16px}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-size:.8rem;text-transform:uppercase}
+td.price{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.error{color:var(--bad);font-size:.8rem}
+.total{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:2px solid var(--border);margin-top:8px;font-size:1.2rem;font-weight:bold}
+.verdict{padding:16px;border-radius:10px;margin-top:12px;text-align:center;font-size:1.1rem;font-weight:bold}
+.verdict.healthy{background:rgba(74,222,128,.1);color:var(--ok);border:1px solid var(--ok)}
+.verdict.tight{background:rgba(251,191,36,.1);color:var(--warn);border:1px solid var(--warn)}
+.verdict.blocked{background:rgba(248,113,113,.1);color:var(--bad);border:1px solid var(--bad)}
+.verdict.unknown{background:var(--card);color:var(--muted);border:1px solid var(--border)}
+.links-box{margin-top:12px}
+.links-box textarea{height:100px;font-size:.8rem}
+.badge{display:inline-block;background:var(--card);padding:3px 8px;border-radius:4px;font-size:.75rem;margin:2px}
+.copy-link{color:var(--accent);cursor:pointer;font-size:.8rem;text-decoration:underline;border:none;background:none}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.token-row{display:flex;gap:8px;align-items:center;margin-top:8px}
+.token-row input{flex:1;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px}
+</style>
+</head>
+<body>
+<main>
+<h1>Thomann Basket Checker</h1>
+<p class="notice">Wklej linki Thomann (po jednym w linii). Narzędzie przekonwertuje je na linki afiliacyjne, sprawdzi ceny i oceni czy zakup mieści się w budżecie.</p>
+
+<div class="token-row">
+  <input id="token" type="password" autocomplete="off" placeholder="Bearer token (opcjonalny, zapisany w sessionStorage)">
+</div>
+
+<h2>Linki</h2>
+<textarea id="links" placeholder="https://www.thomann.de/de/shure_sm7b_vocal_mikrofon.htm&#10;https://www.thomann.de/de/rode_nt1_5th_gen.htm"></textarea>
+<div class="actions">
+  <button id="resolve">Sprawdź ceny i budżet</button>
+  <button id="copy-affiliate" class="secondary" style="display:none">Kopiuj linki afiliacyjne</button>
+</div>
+<div class="notice" id="status"></div>
+
+<h2>Budżet miesięczny</h2>
+<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+  <label>Oczekiwany dochód (PLN brutto)<br><input id="income-input" inputmode="decimal" value="26500" style="width:180px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px"></label>
+  <label>Budżet kosztów (PLN)<br><input id="budget-input" inputmode="decimal" placeholder="np. 15000" style="width:180px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px"></label>
+  <button id="save-budget" class="secondary">Zapisz</button>
+</div>
+<div class="notice" id="budget-status"></div>
+
+<div class="result" id="result"></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const tokenInput = $("token");
+  const storedToken = sessionStorage.getItem("ledgerguard_token");
+  if (storedToken) tokenInput.value = storedToken;
+  tokenInput.addEventListener("change", () => {
+    sessionStorage.setItem("ledgerguard_token", tokenInput.value);
+  });
+
+  function authHeaders() {
+    const t = tokenInput.value.trim();
+    return t ? { "Authorization": "Bearer " + t } : {};
+  }
+
+  async function api(path, opts = {}) {
+    const headers = { ...authHeaders(), ...(opts.headers || {}) };
+    if (opts.body) headers["Content-Type"] = "application/json";
+    const res = await fetch(path, { ...opts, headers }).catch(e => { throw new Error(e.message); });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  function format(amount) {
+    const n = parseFloat(amount);
+    if (isNaN(n)) return amount;
+    return n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  $("resolve").onclick = async () => {
+    const raw = $("links").value.trim();
+    if (!raw) { $("status").textContent = "Wklej linki."; return; }
+
+    const urls = raw.split("\n").map(s => s.trim()).filter(Boolean);
+    $("status").innerHTML = '<span class="spinner"></span> Sprawdzam ' + urls.length + ' linków…';
+    $("resolve").disabled = true;
+    $("copy-affiliate").style.display = "none";
+    $("result").innerHTML = "";
+
+    try {
+      // Step 1: Resolve prices + affiliate links
+      const data = await api("/v1/thomann/resolve", {
+        method: "POST",
+        body: JSON.stringify({ urls })
+      });
+
+      // Step 2: If server couldn't crawl prices, try client-side fetch as
+      // fallback (the browser isn't blocked by Cloudflare like the server is).
+      let totalFromClient = 0;
+      let currencyFromClient = null;
+      const needsClientFetch = data.items.some(i => i.error && !i.price);
+      if (needsClientFetch) {
+        $("status").innerHTML = '<span class="spinner"></span> Serwer zablokowany przez Thomann — próbuję z przeglądarki…';
+        for (const item of data.items) {
+          if (!item.error) continue;
+          try {
+            const resp = await fetch(item.affiliate_url, { mode: "cors" });
+            if (resp.ok) {
+              const html = await resp.text();
+              // Extract price from JSON-LD
+              const m = html.match(/"price"\s*:\s*"?(\d+[.,]?\d*)"?/);
+              if (m) {
+                const raw = m[1].replace(".", "").replace(",", ".");
+                const val = parseFloat(raw);
+                if (!isNaN(val)) {
+                  item.price = m[1].replace(",", ".");
+                  item.currency = html.includes("€") ? "EUR" : html.includes("PLN") ? "PLN" : null;
+                  item.error = null;
+                  totalFromClient += val;
+                  if (!currencyFromClient) currencyFromClient = item.currency;
+                }
+              }
+              // Extract title
+              const tm = html.match(/<title>(.*?)<\/title>/);
+              if (tm) item.title = tm[1].split(" – ")[0].trim();
+            }
+          } catch (e) { /* CORS blocked — keep server error */ }
+        }
+        if (totalFromClient > 0) {
+          data.total = totalFromClient.toFixed(2);
+          data.currency = currencyFromClient;
+          data.resolvable_count = data.items.filter(i => i.price).length;
+        }
+      }
+
+      // Step 3: Check affordability
+      let verdictHtml = "";
+      if (data.total && parseFloat(data.total) > 0) {
+        try {
+          const afford = await api(`/v1/planner/affordability?amount=${encodeURIComponent(data.total)}`);
+          const cls = afford.decision ? afford.decision.toLowerCase() : "unknown";
+          const label = afford.decision ? afford.decision.toUpperCase() : "BRAK BUDŻETU";
+          const expectedIncome = parseFloat(afford.expected_monthly_income);
+          const costsMtd = parseFloat(afford.costs);
+          const basketTotal = parseFloat(data.total);
+          const projectedNet = expectedIncome - costsMtd - basketTotal;
+          const detail = `${afford.message} Koszty MTD: ${format(afford.costs)}.`;
+          const headroom = afford.headroom !== null ? `<div style="font-size:.85rem;margin-top:4px">Pozostaje w budżecie: ${format(afford.headroom)}</div>` : "";
+          const incomeLine = `<div style="font-size:.85rem;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.1)">Oczekiwany dochód: ${format(afford.expected_monthly_income)} PLN</div><div style="font-size:.85rem;margin-top:2px">Projekcja netto po zakupie: <strong>${projectedNet >= 0 ? "+" : ""}${format(projectedNet.toFixed(2))} PLN</strong></div>`;
+          verdictHtml = `<div class="verdict ${cls}">${label}<div style="font-size:.85rem;font-weight:normal;margin-top:4px">${detail}</div>${headroom}${incomeLine}</div>`;
+        } catch (e) {
+          verdictHtml = `<div class="verdict unknown">Nie udało się sprawdzić budżetu: ${e.message}</div>`;
+        }
+      }
+
+      // Step 3: Render results table
+      let tableHtml = "";
+      if (data.items.length) {
+        tableHtml = `<table><thead><tr><th>Produkt</th><th>Cena</th><th>Status</th></tr></thead><tbody>`;
+        for (const item of data.items) {
+          const title = item.title || item.original_url.split("/").pop()?.replace(/\.htm$/, "") || "—";
+          const price = item.price ? `<strong>${format(item.price)}</strong> ${item.currency || ""}` : "—";
+          const status = item.error ? `<span style="color:var(--bad)">${item.error}</span>` : "✓";
+          tableHtml += `<tr><td>${title}</td><td class="price">${price}</td><td>${status}</td></tr>`;
+        }
+        tableHtml += `</tbody></table>`;
+      }
+
+      const totalHtml = data.total && parseFloat(data.total) > 0
+        ? `<div class="total"><span>Razem (${data.resolvable_count} pozycji)</span><span>${format(data.total)} ${data.currency || ""}</span></div>`
+        : "";
+
+      // Affiliate links box
+      const affiliateLinks = data.items.filter(i => !i.error).map(i => i.affiliate_url).join("\n");
+      const linksHtml = affiliateLinks
+        ? `<div class="links-box"><h2>Linki afiliacyjne</h2><textarea id="affiliate-output" readonly>${affiliateLinks}</textarea></div>`
+        : "";
+
+      $("result").innerHTML = tableHtml + totalHtml + verdictHtml + linksHtml;
+      $("status").textContent = data.resolvable_count + "/" + data.items.length + " linków rozwiązanych.";
+      $("copy-affiliate").style.display = affiliateLinks ? "inline-block" : "";
+
+      $("resolve").disabled = false;
+    } catch (e) {
+      $("status").textContent = "Błąd: " + e.message;
+      $("resolve").disabled = false;
+    }
+  };
+
+  $("copy-affiliate").onclick = () => {
+    const el = $("affiliate-output");
+    el.select();
+    document.execCommand("copy");
+    $("copy-affiliate").textContent = "Skopiowano!";
+    setTimeout(() => { $("copy-affiliate").textContent = "Kopiuj linki afiliacyjne"; }, 2000);
+  };
+
+  // Budget load + save
+  async function loadBudget() {
+    try {
+      const b = await api("/v1/budget");
+      $("income-input").value = b.monthly_income;
+      $("budget-input").value = b.monthly_cost_budget || "";
+    } catch (e) { $("budget-status").textContent = "Budżet: " + e.message; }
+  }
+
+  $("save-budget").onclick = async () => {
+    const body = {};
+    const income = $("income-input").value.trim().replace(",", ".");
+    const budget = $("budget-input").value.trim().replace(",", ".");
+    if (income) body.monthly_income = income;
+    if (budget !== undefined) body.monthly_cost_budget = budget;
+    $("budget-status").textContent = "Zapisuję…";
+    try {
+      const r = await api("/v1/budget", { method: "POST", body: JSON.stringify(body) });
+      $("budget-status").textContent = "✓ Zapisano. Dochód: " + r.monthly_income + " PLN, budżet: " + (r.monthly_cost_budget || "brak");
+    } catch (e) { $("budget-status").textContent = "Błąd: " + e.message; }
+  };
+
+  // Only auto-load budget if a token is stored — avoids 401 console errors.
+  const hasToken = sessionStorage.getItem("ledgerguard_token");
+  if (hasToken) {
+    loadBudget();
+  } else {
+    $("budget-status").textContent = "Wpisz token API poniżej, aby załadować budżet.";
+  }
+})();
+</script>
+</main>
+</body>
+</html>

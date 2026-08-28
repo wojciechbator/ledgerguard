@@ -4,14 +4,15 @@ use axum::{
 };
 
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
+const THOMANN_HTML: &str = include_str!("thomann.html");
 const DASHBOARD_CACHE_CONTROL: &str = "private, max-age=60";
-const DASHBOARD_CSP: &str = "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'";
+const DASHBOARD_CSP: &str = "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self' https://*.thomann.de https://*.thomann.pl; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'";
 const CONTENT_SECURITY_POLICY: HeaderName = HeaderName::from_static("content-security-policy");
 const X_CONTENT_TYPE_OPTIONS: HeaderName = HeaderName::from_static("x-content-type-options");
 const X_FRAME_OPTIONS: HeaderName = HeaderName::from_static("x-frame-options");
 const REFERRER_POLICY: HeaderName = HeaderName::from_static("referrer-policy");
 
-pub async fn dashboard() -> Response {
+fn html_response(html: &'static str) -> Response {
     (
         [
             (
@@ -26,9 +27,17 @@ pub async fn dashboard() -> Response {
             (X_FRAME_OPTIONS, HeaderValue::from_static("DENY")),
             (REFERRER_POLICY, HeaderValue::from_static("no-referrer")),
         ],
-        Html(DASHBOARD_HTML),
+        Html(html),
     )
         .into_response()
+}
+
+pub async fn dashboard() -> Response {
+    html_response(DASHBOARD_HTML)
+}
+
+pub async fn thomann_page() -> Response {
+    html_response(THOMANN_HTML)
 }
 
 #[cfg(test)]
@@ -40,8 +49,23 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("<title>LedgerGuard</title>"));
         assert!(DASHBOARD_HTML.contains("/v1/planner/evaluate"));
         assert!(DASHBOARD_HTML.contains("/v1/planner/simulate"));
+        assert!(DASHBOARD_HTML.contains("/v1/ingest/email"));
+        assert!(DASHBOARD_HTML.contains("/v1/costs/summary"));
         assert!(!DASHBOARD_HTML.contains("https://"));
         assert!(!DASHBOARD_HTML.contains("http://"));
+    }
+
+    #[test]
+    fn thomann_page_is_embedded_and_uses_api_endpoints() {
+        assert!(THOMANN_HTML.contains("<title>Thomann"));
+        assert!(THOMANN_HTML.contains("/v1/thomann/resolve"));
+        assert!(THOMANN_HTML.contains("/v1/planner/affordability"));
+        assert!(THOMANN_HTML.contains("affiliate"));
+        // No external script/style/link tags — only example URLs in a
+        // textarea placeholder are allowed.
+        assert!(!THOMANN_HTML.contains("<script src="));
+        assert!(!THOMANN_HTML.contains("<link href="));
+        assert!(!THOMANN_HTML.contains("<img src="));
     }
 
     #[tokio::test]

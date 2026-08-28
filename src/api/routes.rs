@@ -1,14 +1,19 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    str::FromStr,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Request, State},
+    extract::{DefaultBodyLimit, Path, Request, State},
     http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::{Datelike, NaiveDate};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -19,17 +24,25 @@ use tower_http::{
     set_header::SetResponseHeaderLayer,
     timeout::TimeoutLayer,
 };
-use tracing::error;
+use tracing::{error, info};
 
-use super::dashboard::dashboard;
+use super::dashboard::{dashboard, thomann_page};
 use crate::{
     application::{
         AccountingSource, LedgerRepository, ProviderDescriptor, SyncError, SyncReport, sync_month,
     },
-    config::BudgetSettings,
+    config::{BudgetSettings, EmailIngestSettings},
     domain::{
         BudgetPolicy, Decision, EntryKind, LedgerEntry, Money, Month, MonthSummary, Planner,
         PlannerInput, PlannerPolicy, PlannerResult,
+    },
+    infrastructure::{
+        device_sessions::{DeviceSessionRow, DeviceSessionStore},
+        email_ingest::{
+            self,
+            store::{CategoryCostSummary, IngestStore, IngestedDocumentRow, VendorCostSummary},
+        },
+        thomann::{self, ThomannResolveRequest, ThomannResolveResponse},
     },
 };
 
@@ -38,6 +51,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const RECENT_ENTRY_LIMIT: i64 = 10;
 const MAX_MANUAL_CATEGORY_BYTES: usize = 256;
 const MAX_MANUAL_COUNTERPARTY_BYTES: usize = 512;
+const MAX_DEVICE_LABEL_BYTES: usize = 128;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -45,7 +59,8 @@ pub struct AppState {
     pub accounting: Arc<dyn AccountingSource>,
     pub ledger: Arc<dyn LedgerRepository>,
     pub live_sync_enabled: bool,
-    pub budget: BudgetSettings,
+    pub budget: Arc<RwLock<BudgetSettings>>,
+    pub email_ingest: Option<EmailIngestSettings>,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,7 +144,19 @@ pub enum ApiAuth {
     Disabled,
 }
 
+/// State for the combined auth middleware: accepts either the static
+/// bootstrap token or a valid per-device session token. The bootstrap
+/// token is checked first (constant-time hash comparison), then device
+/// tokens are validated against the database by digest.
+#[derive(Clone)]
+struct AuthState {
+    bootstrap: Arc<str>,
+    device_store: DeviceSessionStore,
+}
+
 pub fn router(state: AppState, auth: ApiAuth) -> Router {
+    let device_store = DeviceSessionStore::new(state.pool.clone());
+
     let mut v1 = Router::new()
         .route("/accounting/provider", get(accounting_provider))
         .route("/accounting/sync", post(sync_accounting))
@@ -138,15 +165,38 @@ pub fn router(state: AppState, auth: ApiAuth) -> Router {
         .route("/planner/simulate", post(simulate))
         .route("/ledger/month", get(ledger_month))
         .route("/ledger/manual", post(add_manual_entry))
-        .route("/planner/affordability", get(affordability));
+        .route("/planner/affordability", get(affordability))
+        .route("/ingest/email", post(trigger_email_ingest))
+        .route("/ingest/documents", get(ingest_documents))
+        .route("/costs/summary", get(costs_summary))
+        .route("/thomann/resolve", post(thomann_resolve))
+        .route("/budget", get(get_budget))
+        .route("/budget", post(update_budget));
+
+    // Device session management — bootstrap token only. A device token
+    // must not be able to issue or revoke other device tokens.
+    let auth_routes = Router::new()
+        .route("/auth/device", post(issue_device_token))
+        .route("/auth/device", get(list_device_tokens))
+        .route("/auth/device/{id}", delete(revoke_device_token));
 
     if let ApiAuth::Bearer(expected) = auth {
-        v1 = v1.route_layer(middleware::from_fn_with_state(expected, bearer_auth));
+        let combined = AuthState {
+            bootstrap: expected.clone(),
+            device_store: device_store.clone(),
+        };
+        v1 = v1.route_layer(middleware::from_fn_with_state(combined, bearer_auth));
+        let auth_routes =
+            auth_routes.route_layer(middleware::from_fn_with_state(expected, bootstrap_auth));
+        v1 = v1.merge(auth_routes);
+    } else {
+        v1 = v1.merge(auth_routes);
     }
 
     Router::new()
         .route("/", get(dashboard))
         .route("/dashboard", get(dashboard))
+        .route("/thomann", get(thomann_page))
         .route("/healthz", get(health))
         .route("/readyz", get(ready))
         .nest("/v1", v1)
@@ -169,10 +219,44 @@ pub fn router(state: AppState, auth: ApiAuth) -> Router {
         .with_state(state)
 }
 
-async fn bearer_auth(State(expected): State<Arc<str>>, request: Request, next: Next) -> Response {
-    // Both sides are hashed before comparing: the digest has a fixed length,
-    // so ct_eq never branches on a token-length mismatch and the request path
-    // leaks nothing about the configured secret.
+/// Combined auth: accepts the static bootstrap token OR a valid per-device
+/// session token. Bootstrap is checked first (constant-time), then device
+/// tokens are validated against the database by digest lookup.
+async fn bearer_auth(State(auth): State<AuthState>, request: Request, next: Next) -> Response {
+    let provided = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+
+    let Some(token) = provided else {
+        return unauthorized();
+    };
+
+    // Check bootstrap token first: both sides hashed, constant-time compare.
+    // The digest has a fixed length, so ct_eq never branches on a token-length
+    // mismatch and the request path leaks nothing about the configured secret.
+    let provided_hash = Sha256::digest(token.as_bytes());
+    let expected_hash = Sha256::digest(auth.bootstrap.as_bytes());
+    if bool::from(provided_hash.as_slice().ct_eq(expected_hash.as_slice())) {
+        return next.run(request).await;
+    }
+
+    // Not the bootstrap token — check device session store by digest.
+    match auth.device_store.validate(token).await {
+        Ok(Some(_)) => next.run(request).await,
+        // Unknown or revoked device token, or DB error — fail closed.
+        Ok(None) | Err(_) => unauthorized(),
+    }
+}
+
+/// Bootstrap-only auth: accepts only the static API token, not device tokens.
+/// Used for device session management endpoints (issue/list/revoke).
+async fn bootstrap_auth(
+    State(expected): State<Arc<str>>,
+    request: Request,
+    next: Next,
+) -> Response {
     let authorized = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -187,13 +271,17 @@ async fn bearer_auth(State(expected): State<Arc<str>>, request: Request, next: N
     if authorized {
         next.run(request).await
     } else {
-        ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "missing or invalid bearer token",
-        )
-        .into_response()
+        unauthorized()
     }
+}
+
+fn unauthorized() -> Response {
+    ApiError::new(
+        StatusCode::UNAUTHORIZED,
+        "unauthorized",
+        "missing or invalid bearer token",
+    )
+    .into_response()
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -432,6 +520,9 @@ struct AffordabilityResponse {
     headroom: Option<String>,
     decision: Option<Decision>,
     message: String,
+    /// Configured expected monthly income (gross PLN). Always present —
+    /// defaults to 26 500 PLN if not explicitly set.
+    expected_monthly_income: String,
 }
 
 async fn affordability(
@@ -461,10 +552,13 @@ async fn affordability(
         .map_err(map_repository_error)?;
     let summary = MonthSummary::from_entries(&entries);
 
+    let budget = state.budget.read().unwrap_or_else(|e| e.into_inner());
     let policy = BudgetPolicy {
-        monthly_cost_budget: state.budget.monthly_cost_budget,
-        tight_share_basis_points: state.budget.tight_share_basis_points,
+        monthly_cost_budget: budget.monthly_cost_budget,
+        tight_share_basis_points: budget.tight_share_basis_points,
     };
+    let expected_monthly_income = budget.monthly_income.amount().to_string();
+    drop(budget);
     let (headroom, decision, message, budget_configured) = match policy.afford(&summary, planned) {
         Some(verdict) => (
             Some(verdict.headroom.to_string()),
@@ -497,6 +591,7 @@ async fn affordability(
         headroom,
         decision,
         message,
+        expected_monthly_income,
     }))
 }
 
@@ -641,6 +736,382 @@ async fn add_manual_entry(
         gross: entry.gross.amount().to_string(),
         category: entry.category,
         counterparty: entry.counterparty,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Email-OCR cost ingestion endpoints
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct EmailIngestResponse {
+    status: &'static str,
+    message: String,
+}
+
+/// Triggers email-OCR ingestion as a detached background task.
+/// The IMAP fetch + OCR pipeline runs independently of the request so the
+/// HTTP response returns immediately. Poll `/v1/ingest/documents` to see
+/// results as they arrive, and `/v1/costs/summary` for the running breakdown.
+async fn trigger_email_ingest(
+    State(state): State<AppState>,
+) -> Result<Json<EmailIngestResponse>, ApiError> {
+    let ingest_config = state.email_ingest.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            "email_ingest_not_configured",
+            "LEDGERGUARD_IMAP_USERNAME and LEDGERGUARD_IMAP_PASSWORD are required",
+        )
+    })?;
+
+    let username = ingest_config.imap_username.clone().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            "email_ingest_not_configured",
+            "LEDGERGUARD_IMAP_USERNAME is required",
+        )
+    })?;
+    let password = ingest_config.imap_password.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::CONFLICT,
+            "email_ingest_not_configured",
+            "LEDGERGUARD_IMAP_PASSWORD is required",
+        )
+    })?;
+
+    let store = IngestStore::new(state.pool.clone());
+    let imap_config = email_ingest::imap_client::ImapConfig {
+        host: ingest_config.imap_host.clone(),
+        port: ingest_config.imap_port,
+        username,
+        password: password.expose().to_owned(),
+        sent_folder: ingest_config.sent_folder.clone(),
+        recipient_filter: ingest_config.recipient_filter.clone(),
+        subject_filter: ingest_config.subject_filter.clone(),
+    };
+
+    // Spawn the ingest as a detached background task so the HTTP request
+    // returns immediately. Results appear in `ingested_documents` and
+    // `ledger_entries` as each PDF is processed.
+    tokio::spawn(async move {
+        info!("email ingest: background task started");
+        match email_ingest::run_ingest(imap_config, &store).await {
+            Ok(report) => {
+                info!(
+                    "email ingest: background task complete — {} scanned, {} invoices, {} bank confirmations skipped, {} unparseable, {} errors",
+                    report.scanned,
+                    report.invoices_imported,
+                    report.bank_confirmations_skipped,
+                    report.unparseable,
+                    report.errors
+                );
+            }
+            Err(e) => {
+                error!(error = %e, "email ingest: background task failed");
+            }
+        }
+    });
+
+    Ok(Json(EmailIngestResponse {
+        status: "started",
+        message: "Ingestion started in background. Check /v1/ingest/documents for results."
+            .to_owned(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct IngestDocumentsQuery {
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct IngestDocumentsResponse {
+    documents: Vec<IngestedDocumentRow>,
+}
+
+async fn ingest_documents(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<IngestDocumentsQuery>,
+) -> Result<Json<IngestDocumentsResponse>, ApiError> {
+    let store = IngestStore::new(state.pool.clone());
+    let limit = query.limit.unwrap_or(50).clamp(1, 500);
+
+    let documents = store.recent_documents(limit).await.map_err(|e| {
+        error!(error = %e, "failed to fetch ingested documents");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage_error",
+            "failed to fetch ingested documents",
+        )
+    })?;
+
+    Ok(Json(IngestDocumentsResponse { documents }))
+}
+
+#[derive(Debug, Deserialize)]
+struct CostsSummaryQuery {
+    year: Option<i32>,
+    month: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct CostsSummaryResponse {
+    year: i32,
+    month: u32,
+    by_vendor: Vec<VendorCostSummary>,
+    by_category: Vec<CategoryCostSummary>,
+}
+
+async fn costs_summary(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<CostsSummaryQuery>,
+) -> Result<Json<CostsSummaryResponse>, ApiError> {
+    let now = warsaw_now();
+    let year = query.year.unwrap_or(now.year());
+    let month = query.month.unwrap_or(now.month());
+
+    let store = IngestStore::new(state.pool.clone());
+
+    let by_vendor = store
+        .cost_summary_by_vendor(year, month)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to fetch vendor cost summary");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage_error",
+                "failed to fetch cost summary",
+            )
+        })?;
+
+    let by_category = store
+        .cost_summary_by_category(year, month)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "failed to fetch category cost summary");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "storage_error",
+                "failed to fetch cost summary",
+            )
+        })?;
+
+    Ok(Json(CostsSummaryResponse {
+        year,
+        month,
+        by_vendor,
+        by_category,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Thomann affiliate link converter + price crawler
+// ---------------------------------------------------------------------------
+
+async fn thomann_resolve(
+    Json(request): Json<ThomannResolveRequest>,
+) -> Result<Json<ThomannResolveResponse>, ApiError> {
+    if request.urls.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "empty_urls",
+            "at least one URL is required",
+        ));
+    }
+    if request.urls.len() > 50 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "too_many_urls",
+            "maximum 50 URLs per request",
+        ));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent("Mozilla/5.0 (compatible; LedgerGuard/1.0)")
+        .build()
+        .map_err(|e| {
+            error!(error = %e, "failed to build HTTP client");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "client_error",
+                "failed to build HTTP client",
+            )
+        })?;
+
+    let response = thomann::resolve_batch(&client, &request.urls).await;
+
+    Ok(Json(response))
+}
+
+// ---------------------------------------------------------------------------
+// Device session token endpoints (bootstrap token only)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct IssueDeviceTokenRequest {
+    label: String,
+}
+
+#[derive(Debug, Serialize)]
+struct IssueDeviceTokenResponse {
+    token: String,
+    session: DeviceSessionRow,
+}
+
+#[derive(Debug, Serialize)]
+struct ListDeviceTokensResponse {
+    sessions: Vec<DeviceSessionRow>,
+}
+
+#[derive(Debug, Serialize)]
+struct RevokeDeviceTokenResponse {
+    revoked: bool,
+}
+
+async fn issue_device_token(
+    State(state): State<AppState>,
+    Json(request): Json<IssueDeviceTokenRequest>,
+) -> Result<Json<IssueDeviceTokenResponse>, ApiError> {
+    let label =
+        normalize_manual_optional_text("label", Some(&request.label), MAX_DEVICE_LABEL_BYTES)?
+            .ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_label",
+                    "label must be a non-empty string",
+                )
+            })?;
+
+    let store = DeviceSessionStore::new(state.pool.clone());
+    let (token, session) = store.issue(&label).await.map_err(|e| {
+        error!(error = %e, "failed to issue device token");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage_error",
+            "failed to issue device token",
+        )
+    })?;
+
+    Ok(Json(IssueDeviceTokenResponse { token, session }))
+}
+
+async fn list_device_tokens(
+    State(state): State<AppState>,
+) -> Result<Json<ListDeviceTokensResponse>, ApiError> {
+    let store = DeviceSessionStore::new(state.pool.clone());
+    let sessions = store.list().await.map_err(|e| {
+        error!(error = %e, "failed to list device tokens");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage_error",
+            "failed to list device tokens",
+        )
+    })?;
+
+    Ok(Json(ListDeviceTokensResponse { sessions }))
+}
+
+async fn revoke_device_token(
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<RevokeDeviceTokenResponse>, ApiError> {
+    let store = DeviceSessionStore::new(state.pool.clone());
+    let revoked = store.revoke(id).await.map_err(|e| {
+        error!(error = %e, "failed to revoke device token");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage_error",
+            "failed to revoke device token",
+        )
+    })?;
+
+    if !revoked {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "device session not found or already revoked",
+        ));
+    }
+
+    Ok(Json(RevokeDeviceTokenResponse { revoked }))
+}
+
+// ---------------------------------------------------------------------------
+// Budget configuration endpoints
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct BudgetResponse {
+    monthly_cost_budget: Option<String>,
+    monthly_income: String,
+    tight_share_basis_points: u16,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateBudgetRequest {
+    /// Optional new monthly income (gross PLN, decimal string).
+    monthly_income: Option<String>,
+    /// Optional new monthly cost budget (gross PLN, decimal string).
+    monthly_cost_budget: Option<String>,
+}
+
+async fn get_budget(State(state): State<AppState>) -> Json<BudgetResponse> {
+    let budget = state.budget.read().unwrap_or_else(|e| e.into_inner());
+    Json(BudgetResponse {
+        monthly_cost_budget: budget.monthly_cost_budget.map(|m| m.amount().to_string()),
+        monthly_income: budget.monthly_income.amount().to_string(),
+        tight_share_basis_points: budget.tight_share_basis_points,
+    })
+}
+
+async fn update_budget(
+    State(state): State<AppState>,
+    Json(request): Json<UpdateBudgetRequest>,
+) -> Result<Json<BudgetResponse>, ApiError> {
+    let mut budget = state.budget.write().unwrap_or_else(|e| e.into_inner());
+
+    if let Some(income_str) = request.monthly_income.as_deref().map(str::trim) {
+        if income_str.is_empty() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_income",
+                "monthly_income must be a non-empty decimal",
+            ));
+        }
+        let income_decimal = Decimal::from_str(income_str).map_err(|_| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_income",
+                "monthly_income must be a decimal like 26500 or 26500.00",
+            )
+        })?;
+        budget.monthly_income = Money::non_negative(income_decimal)
+            .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "invalid_income", e.to_string()))?;
+    }
+
+    if let Some(budget_str) = request.monthly_cost_budget.as_deref().map(str::trim) {
+        if budget_str.is_empty() {
+            budget.monthly_cost_budget = None;
+        } else {
+            let budget_decimal = Decimal::from_str(budget_str).map_err(|_| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_budget",
+                    "monthly_cost_budget must be a decimal like 15000 or 15000.00",
+                )
+            })?;
+            budget.monthly_cost_budget =
+                Some(Money::non_negative(budget_decimal).map_err(|e| {
+                    ApiError::new(StatusCode::BAD_REQUEST, "invalid_budget", e.to_string())
+                })?);
+        }
+    }
+
+    Ok(Json(BudgetResponse {
+        monthly_cost_budget: budget.monthly_cost_budget.map(|m| m.amount().to_string()),
+        monthly_income: budget.monthly_income.amount().to_string(),
+        tight_share_basis_points: budget.tight_share_basis_points,
     }))
 }
 
