@@ -40,7 +40,10 @@ use crate::{
         device_sessions::{DeviceSessionRow, DeviceSessionStore},
         email_ingest::{
             self,
-            store::{CategoryCostSummary, IngestStore, IngestedDocumentRow, VendorCostSummary},
+            store::{
+                CategoryCostSummary, IngestStore, IngestedDocumentRow, MonthlyTrend,
+                VendorCostSummary,
+            },
         },
         thomann::{self, ThomannResolveRequest, ThomannResolveResponse},
     },
@@ -169,6 +172,7 @@ pub fn router(state: AppState, auth: ApiAuth) -> Router {
         .route("/ingest/email", post(trigger_email_ingest))
         .route("/ingest/documents", get(ingest_documents))
         .route("/costs/summary", get(costs_summary))
+        .route("/costs/trends", get(costs_trends))
         .route("/thomann/resolve", post(thomann_resolve))
         .route("/budget", get(get_budget))
         .route("/budget", post(update_budget));
@@ -928,6 +932,37 @@ async fn costs_summary(
         by_vendor,
         by_category,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct CostsTrendsQuery {
+    months: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct CostsTrendsResponse {
+    months: Vec<MonthlyTrend>,
+}
+
+/// Returns monthly cost aggregates for the last N months (default 12).
+/// Used by the trends chart in the dashboard.
+async fn costs_trends(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<CostsTrendsQuery>,
+) -> Result<Json<CostsTrendsResponse>, ApiError> {
+    let months_back = query.months.unwrap_or(12).clamp(1, 60);
+
+    let store = IngestStore::new(state.pool.clone());
+    let months = store.monthly_trends(months_back).await.map_err(|e| {
+        error!(error = %e, "failed to fetch monthly trends");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "storage_error",
+            "failed to fetch monthly trends",
+        )
+    })?;
+
+    Ok(Json(CostsTrendsResponse { months }))
 }
 
 // ---------------------------------------------------------------------------

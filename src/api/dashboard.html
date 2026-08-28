@@ -63,6 +63,14 @@
     .invoice-list th { text-align: left; color: #8e97aa; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; border-bottom: 1px solid #292f3d; }
     .invoice-list td { padding: 8px; border-bottom: 1px solid #1e2331; }
     .badge { background: #1e2533; padding: 4px 10px; border-radius: 4px; font-size: 12px; }
+    /* Trends chart */
+    .bar-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; }
+    .bar { width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; transition: height .3s; }
+    .bar.ok { background: linear-gradient(to top, #2a7a52, #74e0a8); }
+    .bar.warn { background: linear-gradient(to top, #8a6a2a, #ffc766); }
+    .bar.bad { background: linear-gradient(to top, #8a2a32, #ff7d86); }
+    .bar-label { font-size: 10px; color: #8e97aa; margin-top: 4px; text-align: center; white-space: nowrap; overflow: hidden; }
+    .bar-value { font-size: 10px; color: #aab2c4; margin-bottom: 2px; white-space: nowrap; }
     @media (min-width: 1000px) {
   .month-card { grid-column: span 7; }
   .month-card + .card.side { grid-column: span 5; }
@@ -132,6 +140,13 @@
   <!-- ==================== TAB: KOSZTY ==================== -->
   <section class="tab-content" data-tab="costs">
     <div class="grid">
+      <article class="card">
+        <h2>Trendy kosztów (12 miesięcy)</h2>
+        <div id="trends-chart" style="display:flex;align-items:flex-end;gap:6px;height:160px;margin:16px 0 8px;padding:0 4px"></div>
+        <div id="trends-labels" style="display:flex;gap:6px;margin-bottom:12px"></div>
+        <div id="trends-table"></div>
+      </article>
+
       <article class="card">
         <h2>Koszty z email-OCR</h2>
         <div class="month-nav">
@@ -664,6 +679,53 @@
   }
   updateCostsLabel();
 
+  // --- Trends chart ---
+  async function loadTrends() {
+    try {
+      const r = await api("/v1/costs/trends?months=12");
+      renderTrends(r.months || []);
+    } catch (e) {
+      $("trends-table").innerHTML = `<p class="notice">Błąd: ${e.message}</p>`;
+    }
+  }
+  function renderTrends(months) {
+    const chartEl = $("trends-chart");
+    const labelsEl = $("trends-labels");
+    const tableEl = $("trends-table");
+    if (!months.length) {
+      chartEl.innerHTML = "";
+      labelsEl.innerHTML = "";
+      tableEl.innerHTML = "<p class='notice'>Brak danych.</p>";
+      return;
+    }
+    const maxVal = Math.max(...months.map(m => parseFloat(m.total_gross)), 1);
+    const budgetStr = localStorage.getItem("ledgerguard_budget");
+    const budget = budgetStr ? parseFloat(budgetStr) : 0;
+    const monthShort = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
+
+    let chartHtml = "";
+    let labelsHtml = "";
+    for (const m of months) {
+      const val = parseFloat(m.total_gross);
+      const heightPct = Math.max((val / maxVal) * 100, 2);
+      const isOverBudget = budget > 0 && val > budget;
+      const isTight = budget > 0 && val > budget * 0.9 && val <= budget;
+      const cls = isOverBudget ? "bad" : isTight ? "warn" : "ok";
+      const valLabel = val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val.toFixed(0);
+      chartHtml += `<div class="bar-container"><div class="bar-value">${valLabel}</div><div class="bar ${cls}" style="height:${heightPct}%"></div></div>`;
+      labelsHtml += `<div class="bar-label">${monthShort[m.month - 1]}<br>${String(m.year).slice(2)}</div>`;
+    }
+    chartEl.innerHTML = chartHtml;
+    labelsEl.innerHTML = labelsHtml;
+
+    let tableHtml = `<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px"><thead><tr><th style="text-align:left">Miesiąc</th><th>Faktur</th><th>Netto</th><th>VAT</th><th style="text-align:right">Brutto</th></tr></thead><tbody>`;
+    for (const m of months.slice().reverse()) {
+      tableHtml += `<tr><td>${monthNames[m.month - 1]} ${m.year}</td><td style="text-align:center">${m.invoice_count}</td><td>${format(m.total_net)}</td><td>${format(m.total_vat)}</td><td style="text-align:right"><strong>${format(m.total_gross)}</strong></td></tr>`;
+    }
+    tableHtml += `</tbody></table>`;
+    tableEl.innerHTML = tableHtml;
+  }
+
   $("ingest-email").onclick = async () => {
     $("ingest-result").textContent = "Uruchamiam w tle…";
     try {
@@ -684,6 +746,7 @@
         try {
           await loadCosts(costsYear, costsMonth);
           await loadMonth();
+          await loadTrends();
           const docs = await api("/v1/ingest/documents?limit=500");
           const afterCount = docs.documents ? docs.documents.length : 0;
           const newDocs = afterCount - beforeCount;
@@ -718,6 +781,7 @@
   if (hasToken) {
     loadMonth();
     loadCosts();
+    loadTrends();
     status();
   } else {
     $("month-detail").textContent = "Wpisz token API w zakładce Ustawienia, aby załadować dane.";

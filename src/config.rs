@@ -144,6 +144,9 @@ pub struct EmailIngestSettings {
     /// ensures historical invoices are captured on the first run; the
     /// content-hash dedup table prevents reprocessing on subsequent runs.
     pub lookback_days: u32,
+    /// How often to auto-sync email invoices, in hours. Default 24 means
+    /// once per day. Set to 0 to disable auto-sync (manual ingest only).
+    pub auto_sync_interval_hours: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +272,9 @@ impl Config {
                 lookback_days: optional_env("LEDGERGUARD_INGEST_LOOKBACK_DAYS")
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(365),
+                auto_sync_interval_hours: optional_env("LEDGERGUARD_INGEST_INTERVAL_HOURS")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(24),
             },
         })
     }
