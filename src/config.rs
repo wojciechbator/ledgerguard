@@ -157,6 +157,23 @@ pub struct Config {
     pub budget: BudgetSettings,
     pub accounting: AccountingSettings,
     pub email_ingest: EmailIngestSettings,
+    pub tax: TaxSettings,
+}
+
+/// Tax estimation settings for the Polish JDG (sole proprietorship) case.
+/// These are used to auto-calculate monthly tax reserves so the planner
+/// can pre-fill the "Podatki + rezerwy" field. All rates are in basis
+/// points (1200 = 12%). The user can override each estimate in the UI.
+#[derive(Debug, Clone)]
+pub struct TaxSettings {
+    /// PIT rate in basis points. Default 1200 (12% — ryczałt).
+    pub pit_rate_basis_points: u16,
+    /// VAT rate in basis points. Default 2300 (23%).
+    pub vat_rate_basis_points: u16,
+    /// Monthly ZUS contribution (social security). Default 1500 PLN.
+    pub zus_monthly: Money,
+    /// Monthly health insurance contribution. Default 319 PLN.
+    pub health_insurance_monthly: Money,
 }
 
 impl Config {
@@ -275,6 +292,34 @@ impl Config {
                 auto_sync_interval_hours: optional_env("LEDGERGUARD_INGEST_INTERVAL_HOURS")
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(24),
+            },
+            tax: TaxSettings {
+                pit_rate_basis_points: optional_env("LEDGERGUARD_PIT_RATE_BP")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1200),
+                vat_rate_basis_points: optional_env("LEDGERGUARD_VAT_RATE_BP")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(2300),
+                zus_monthly: optional_env("LEDGERGUARD_ZUS_MONTHLY")
+                    .and_then(|raw| {
+                        Decimal::from_str(&raw)
+                            .ok()
+                            .and_then(|value| Money::non_negative(value).ok())
+                    })
+                    .unwrap_or_else(|| {
+                        Money::non_negative(Decimal::new(150_000, 2))
+                            .expect("1500.00 is a valid Money")
+                    }),
+                health_insurance_monthly: optional_env("LEDGERGUARD_HEALTH_INSURANCE_MONTHLY")
+                    .and_then(|raw| {
+                        Decimal::from_str(&raw)
+                            .ok()
+                            .and_then(|value| Money::non_negative(value).ok())
+                    })
+                    .unwrap_or_else(|| {
+                        Money::non_negative(Decimal::new(31_900, 2))
+                            .expect("319.00 is a valid Money")
+                    }),
             },
         })
     }
