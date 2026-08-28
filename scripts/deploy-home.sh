@@ -51,6 +51,9 @@ SALDEO_BASE_URL=https://saldeo.brainshare.pl
 # SALDEO_USERNAME=
 # SALDEO_API_TOKEN=
 # SALDEO_COMPANY_PROGRAM_ID=
+# Email-OCR cost ingestion — both required for the ingest button to work.
+# LEDGERGUARD_IMAP_USERNAME=
+# LEDGERGUARD_IMAP_PASSWORD=
 EOF
   chmod 600 "${ENV_FILE}"
   log "created ${ENV_FILE} with random PostgreSQL/API secrets"

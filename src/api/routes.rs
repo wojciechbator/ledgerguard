@@ -454,6 +454,10 @@ struct LedgerMonthResponse {
     net: String,
     entries: usize,
     recent: Vec<LedgerEntryView>,
+    /// Configured expected monthly income (gross PLN). Always present —
+    /// defaults to 26 500 PLN if not explicitly set. The dashboard uses
+    /// this as a projection when actual revenue entries are absent.
+    expected_monthly_income: String,
 }
 
 async fn ledger_month(
@@ -467,6 +471,10 @@ async fn ledger_month(
         .await
         .map_err(map_repository_error)?;
     let summary = MonthSummary::from_entries(&entries);
+    let expected_monthly_income = {
+        let budget = state.budget.read().unwrap_or_else(|e| e.into_inner());
+        budget.monthly_income.amount().to_string()
+    };
 
     // The preview is bounded in SQL (ORDER BY booked_on DESC, id DESC LIMIT),
     // so a heavy month no longer pays for a full materialize-and-sort just to
@@ -498,6 +506,7 @@ async fn ledger_month(
         net: summary.net.to_string(),
         entries: summary.entries,
         recent,
+        expected_monthly_income,
     }))
 }
 

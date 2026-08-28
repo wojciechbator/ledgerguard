@@ -344,12 +344,22 @@
   async function loadMonth() {
     try {
       const m = await api("/v1/ledger/month");
-      $("month-income").textContent = format(m.income);
+      const actualIncome = parseFloat(m.income) || 0;
+      const expectedIncome = parseFloat(m.expected_monthly_income) || 0;
+      const costs = parseFloat(m.costs) || 0;
+      // When no revenue has been recorded yet, show the planned monthly
+      // income as a projection so the net reflects expected cash flow,
+      // not a misleading deficit from costs-only entries.
+      const projected = actualIncome === 0 && expectedIncome > 0;
+      const displayIncome = projected ? expectedIncome : actualIncome;
+      const displayNet = displayIncome - costs;
+      $("month-income").textContent = format(displayIncome.toFixed(2));
       $("month-costs").textContent = format(m.costs);
       const netEl = $("month-net");
-      netEl.textContent = format(m.net);
-      netEl.className = `big ${m.net.startsWith("-") ? "bad" : "ok"}`;
-      $("month-detail").textContent = `${m.entries} pozycji w ksiedze. ${m.budget_configured ? "" : "Ustaw budzet, aby widziec werdykt."}`;
+      netEl.textContent = format(displayNet.toFixed(2));
+      netEl.className = `big ${displayNet < 0 ? "bad" : "ok"}`;
+      const projectionNote = projected ? " (plan)" : "";
+      $("month-detail").textContent = `${m.entries} pozycji w ksiedze${projectionNote}. ${m.budget_configured ? "" : "Ustaw budzet, aby widziec werdykt."}`;
     } catch (e) {
       $("month-detail").textContent = `Blad: ${e.message}`;
     }
