@@ -78,10 +78,11 @@ fn extract_with_tesseract(pdf_bytes: &[u8]) -> Result<String, PdfExtractError> {
 
     std::fs::write(&pdf_path, pdf_bytes).map_err(|e| PdfExtractError::TempFile(e.to_string()))?;
 
-    // Render each page to a PNG at 300 DPI — high enough for Tesseract to
-    // read small print on Polish invoices.
+    // Render each page to a PNG at 400 DPI. 300 DPI was too low for
+    // thermal-printer gas station receipts — 400 gives Tesseract enough
+    // pixel density to distinguish digits on small print.
     let render = Command::new("pdftoppm")
-        .args(["-r", "300", "-png"])
+        .args(["-r", "400", "-png"])
         .arg(&pdf_path)
         .arg(&ppm_prefix)
         .output()
@@ -111,10 +112,13 @@ fn extract_with_tesseract(pdf_bytes: &[u8]) -> Result<String, PdfExtractError> {
     let mut full_text = String::new();
 
     for page in &pages {
+        // PSM 6 (Assume a single uniform block of text) works best for
+        // receipts and invoices with simple column layouts. The default
+        // PSM 3 (fully automatic) often missegments narrow receipts.
         let output = Command::new("tesseract")
             .arg(page)
             .arg("stdout")
-            .args(["-l", "pol+eng"])
+            .args(["-l", "pol+eng", "--psm", "6"])
             .output()
             .map_err(|e| PdfExtractError::Ocr(format!("spawn tesseract: {e}")))?;
 
