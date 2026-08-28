@@ -30,7 +30,7 @@ RUN --mount=type=cache,id=ledgerguard-cargo-registry,target=/usr/local/cargo/reg
     && cp "/app/target-final/release/ledgerguard" /ledgerguard
 
 FROM alpine:3.21 AS runtime
-RUN apk add --no-cache ca-certificates poppler-utils tesseract-ocr tesseract-ocr-data-pol && \
+RUN apk add --no-cache ca-certificates poppler-utils tesseract-ocr tesseract-ocr-data-pol tesseract-ocr-data-eng && \
     adduser -D -u 10001 ledgerguard
 WORKDIR /app
 COPY --from=builder /ledgerguard /ledgerguard
