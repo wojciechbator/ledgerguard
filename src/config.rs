@@ -140,6 +140,10 @@ pub struct EmailIngestSettings {
     pub recipient_filter: String,
     /// Subject filter — only emails with this substring in the subject are processed.
     pub subject_filter: String,
+    /// How many days back to search the IMAP sent folder. Default 365
+    /// ensures historical invoices are captured on the first run; the
+    /// content-hash dedup table prevents reprocessing on subsequent runs.
+    pub lookback_days: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -262,6 +266,9 @@ impl Config {
                     .unwrap_or_else(|| "wbator@dok.saldeo.pl".to_owned()),
                 subject_filter: optional_env("LEDGERGUARD_INGEST_SUBJECT")
                     .unwrap_or_else(|| "(5767)".to_owned()),
+                lookback_days: optional_env("LEDGERGUARD_INGEST_LOOKBACK_DAYS")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(365),
             },
         })
     }

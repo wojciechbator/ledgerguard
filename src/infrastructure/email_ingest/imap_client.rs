@@ -38,6 +38,9 @@ pub struct ImapConfig {
     pub sent_folder: String,
     pub recipient_filter: String,
     pub subject_filter: String,
+    /// How many days back to search. Replaces the old current-month-only
+    /// filter so historical invoices are captured on the first run.
+    pub lookback_days: u32,
 }
 
 /// Size of each IMAP body fetch batch. Fetching 969 emails one-by-one is
@@ -82,32 +85,34 @@ fn search_and_extract(
         .select(&config.sent_folder)
         .map_err(|e| ImapFetchError::Mailbox(e.to_string()))?;
 
-    // Search for emails TO the recipient filter, SINCE the first day of the
-    // current month. This limits the fetch to only this month's emails instead
-    // of scanning the entire sent folder history. IMAP date format is
-    // DD-Mon-YYYY (e.g. "01-Aug-2026").
+    // Search for emails TO the recipient filter, SINCE N days ago. The
+    // lookback period (default 365 days) ensures historical invoices are
+    // captured on the first run; the content-hash dedup table prevents
+    // reprocessing on subsequent runs. IMAP date format is DD-Mon-YYYY.
     const MONTH_NAMES: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     let now = Utc::now();
-    let first_of_month = now.date_naive().with_day(1).unwrap_or(now.date_naive());
-    let month_name = MONTH_NAMES[(first_of_month.month() as usize) - 1];
+    let since_date = now - chrono::Duration::days(config.lookback_days as i64);
+    let month_name = MONTH_NAMES[(since_date.month() as usize) - 1];
     let search_query = format!(
         "TO \"{}\" SINCE {:02}-{}-{}",
         config.recipient_filter,
-        first_of_month.day(),
+        since_date.day(),
         month_name,
-        first_of_month.year()
+        since_date.year()
     );
     let uids = session
         .uid_search(&search_query)
         .map_err(|e| ImapFetchError::Fetch(e.to_string()))?;
 
     info!(
-        "email ingest: {} UIDs match TO + SINCE {}-{:02}-01 filter",
+        "email ingest: {} UIDs match TO + SINCE {}-{:02}-{:02} filter ({}-day lookback)",
         uids.len(),
-        first_of_month.year(),
-        first_of_month.month()
+        since_date.year(),
+        since_date.month(),
+        since_date.day(),
+        config.lookback_days,
     );
 
     // Sort UIDs and process in batches. We fetch full bodies (BODY.PEEK[])

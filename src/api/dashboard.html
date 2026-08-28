@@ -432,6 +432,13 @@
   $("ingest-email").onclick = async () => {
     $("ingest-result").textContent = "Uruchamiam w tle…";
     try {
+      // Snapshot the document count before ingest so we can detect
+      // genuinely new documents, instead of reporting stale DB rows.
+      let beforeCount = 0;
+      try {
+        const before = await api("/v1/ingest/documents?limit=500");
+        beforeCount = before.documents ? before.documents.length : 0;
+      } catch (_) {}
       const r = await api("/v1/ingest/email", { method: "POST" });
       $("ingest-result").textContent = r.message || "Ingestion started";
       // Poll for results every 5s, up to 2 minutes
@@ -442,9 +449,15 @@
         try {
           await loadCosts();
           await loadMonth();
-          const docs = await api("/v1/ingest/documents?limit=5");
-          if (docs.documents && docs.documents.length > 0) {
-            $("ingest-result").textContent = `Zaladowano ${docs.documents.length} dokumentów. Koszty zaktualizowane.`;
+          const docs = await api("/v1/ingest/documents?limit=500");
+          const afterCount = docs.documents ? docs.documents.length : 0;
+          const newDocs = afterCount - beforeCount;
+          if (newDocs > 0) {
+            $("ingest-result").textContent = `Zaladowano ${newDocs} nowych dokumentów. Koszty zaktualizowane.`;
+          } else if (polls >= maxPolls) {
+            $("ingest-result").textContent = "Brak nowych dokumentów. Wszystkie faktury z tego okresu były już przetworzone.";
+          } else {
+            $("ingest-result").textContent = `Przetwarzam… (poll ${polls}/${maxPolls})`;
           }
           if (polls < maxPolls) setTimeout(poll, 5000);
         } catch (e) { /* ignore poll errors */ }
