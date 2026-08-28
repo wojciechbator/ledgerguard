@@ -104,6 +104,15 @@
       </details>
     </article>
 
+    <aside class="card side">
+      <h2>Linki Thomann</h2>
+      <p class="notice" style="margin:0 0 10px">Wklej linki Thomann (po jednym w linii) — konwertuje na affiliate i zaczytuje ceny.</p>
+      <textarea id="thomann-urls" rows="4" style="width:100%;border-radius:11px;border:1px solid #303747;background:#10131a;color:#f5f7fb;padding:11px 12px;font:inherit;resize:vertical;margin-bottom:10px" placeholder="thomann.de/de/...&#10;thomann.pl/pl/..."></textarea>
+      <button id="thomann-resolve" class="secondary">Rozwiąż linki</button>
+      <div class="notice" id="thomann-result">—</div>
+      <div id="thomann-items" style="margin-top:10px"></div>
+    </aside>
+
     <article class="card">
       <h2>Koszty z email-OCR</h2>
       <p class="notice" style="margin:0 0 10px">Faktury kosztowe przesłane na dok.saldeo.pl, rozpoznane automatycznie z załączników PDF.</p>
@@ -397,6 +406,34 @@
       $("manual-gross").value = ""; $("manual-category").value = "";
       await loadMonth();
     } catch (e) { $("manual-result").textContent = e.message; }
+  };
+
+  $("thomann-resolve").onclick = async () => {
+    const raw = $("thomann-urls").value.trim();
+    if (!raw) { $("thomann-result").textContent = "Wklej przynajmniej jeden link."; return; }
+    const urls = raw.split("\n").map(s => s.trim()).filter(Boolean);
+    if (!urls.length) { $("thomann-result").textContent = "Wklej przynajmniej jeden link."; return; }
+    $("thomann-result").textContent = `Rozwiązuję ${urls.length} linków…`;
+    $("thomann-items").innerHTML = "";
+    try {
+      const r = await api("/v1/thomann/resolve", { method: "POST", body: JSON.stringify({ urls }) });
+      const el = $("thomann-items");
+      el.innerHTML = "";
+      let html = "";
+      for (const item of r.items) {
+        const price = item.price ? `${item.price} ${item.currency || ""}` : "—";
+        const title = item.title || item.original_url;
+        const err = item.error ? ` <span style="color:#ff7d86">${item.error}</span>` : "";
+        html += `<div style="padding:8px 0;border-bottom:1px solid #292f3d"><div style="font-size:13px;color:#cdd3e2">${title}</div><div style="font-size:12px;color:#8e97aa;margin-top:2px">${price}${err}</div><a href="${item.affiliate_url}" target="_blank" rel="noopener" style="font-size:12px;color:#6673ff;word-break:break-all">link affiliate →</a></div>`;
+      }
+      if (r.resolvable_count > 0) {
+        html += `<div style="margin-top:10px;font-size:13px"><strong>Suma: ${r.total} ${r.currency || ""}</strong> (${r.resolvable_count} pozycji)</div>`;
+      }
+      el.innerHTML = html;
+      $("thomann-result").textContent = r.resolvable_count > 0
+        ? `Rozwiązano ${r.resolvable_count}/${r.items.length} linków.`
+        : `Brak cen do zaczytania (${r.items.length} linków).`;
+    } catch (e) { $("thomann-result").textContent = e.message; }
   };
 
   async function loadCosts() {
