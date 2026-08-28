@@ -81,6 +81,12 @@ const INVOICE_MARKERS: &[&str] = &[
     "nabywca",
     "termin płatności",
     "sposób płatności",
+    // English invoice markers (Thomann, MUSIC STORE, Amazon).
+    "invoice nr",
+    "invoice number",
+    "invoice date",
+    "rechnung",
+    "rechnungsdatum",
 ];
 
 pub fn classify(text: &str) -> DocumentClass {
