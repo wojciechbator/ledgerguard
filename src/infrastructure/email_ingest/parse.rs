@@ -470,7 +470,10 @@ fn extract_vat(text: &str) -> Option<Decimal> {
         {
             // Skip false matches where the captured amount is followed by "%"
             // — it's a VAT rate, not a VAT amount (e.g. "Stawka VAT: 23 %").
-            let match_end = caps.get(0).unwrap().end();
+            let Some(full_match) = caps.get(0) else {
+                continue;
+            };
+            let match_end = full_match.end();
             let after = text[match_end..].chars().next().unwrap_or(' ');
             if after == '%' {
                 continue;
@@ -478,7 +481,7 @@ fn extract_vat(text: &str) -> Option<Decimal> {
 
             // Skip "Cena bez VAT: 418,7" — "bez VAT" means "excluding VAT",
             // so the amount is the net price, not the VAT amount.
-            let match_start = caps.get(0).unwrap().start();
+            let match_start = full_match.start();
             let before = &text[..match_start];
             if before.to_lowercase().ends_with("bez ") {
                 continue;
