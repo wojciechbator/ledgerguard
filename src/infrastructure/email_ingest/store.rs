@@ -268,6 +268,59 @@ impl IngestStore {
             })
             .collect())
     }
+
+    /// Returns monthly cost aggregates for the last N months, oldest first.
+    /// Used by the trends chart in the dashboard. Only counts email-OCR
+    /// expense entries.
+    pub async fn monthly_trends(&self, months_back: u32) -> Result<Vec<MonthlyTrend>, StoreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                EXTRACT(YEAR FROM booked_on)::int  AS year,
+                EXTRACT(MONTH FROM booked_on)::int AS month,
+                COUNT(*)::bigint                   AS invoice_count,
+                COALESCE(SUM(gross), 0)             AS total_gross,
+                COALESCE(SUM(net), 0)               AS total_net,
+                COALESCE(SUM(vat), 0)               AS total_vat
+            FROM ledger_entries
+            WHERE source = 'email-ocr'
+              AND kind = 'expense'
+              AND booked_on >= date_trunc('month', NOW()) - ($1 || ' months')::interval
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+            "#,
+        )
+        .bind(format!("{months_back}"))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?;
+
+        Ok(rows.iter().map(MonthlyTrend::from).collect())
+    }
+}
+
+/// Monthly cost aggregate for the trends view.
+#[derive(Debug, Clone, Serialize)]
+pub struct MonthlyTrend {
+    pub year: i32,
+    pub month: u32,
+    pub invoice_count: usize,
+    pub total_gross: Decimal,
+    pub total_net: Decimal,
+    pub total_vat: Decimal,
+}
+
+impl From<&sqlx::postgres::PgRow> for MonthlyTrend {
+    fn from(row: &sqlx::postgres::PgRow) -> Self {
+        Self {
+            year: row.get("year"),
+            month: row.get::<i32, _>("month") as u32,
+            invoice_count: row.get::<i64, _>("invoice_count") as usize,
+            total_gross: row.get("total_gross"),
+            total_net: row.get("total_net"),
+            total_vat: row.get("total_vat"),
+        }
+    }
 }
 
 /// Monthly cost summary for a single vendor.

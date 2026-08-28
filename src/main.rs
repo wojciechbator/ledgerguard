@@ -91,6 +91,42 @@ async fn main() -> Result<()> {
         budget: std::sync::Arc::new(std::sync::RwLock::new(config.budget.clone())),
         email_ingest,
     };
+
+    // Spawn auto-sync background task for email-OCR ingest. Runs every
+    // N hours (default 24). The first run is delayed 60s to let the
+    // server bind and migrations complete. Set interval to 0 to disable.
+    if let Some(ref ingest_config) = state.email_ingest {
+        let interval_hours = ingest_config.auto_sync_interval_hours;
+        if interval_hours > 0 {
+            let pool_clone = state.pool.clone();
+            let ingest_config_clone = ingest_config.clone();
+            tokio::spawn(async move {
+                let initial_delay = Duration::from_secs(60);
+                let interval = Duration::from_secs(u64::from(interval_hours) * 3600);
+                tokio::time::sleep(initial_delay).await;
+                loop {
+                    info!("auto-sync: starting scheduled email ingest");
+                    match run_auto_ingest(&pool_clone, &ingest_config_clone).await {
+                        Ok(report) => {
+                            info!(
+                                "auto-sync: complete — {} scanned, {} invoices, {} skipped, {} unparseable, {} errors",
+                                report.scanned,
+                                report.invoices_imported,
+                                report.bank_confirmations_skipped,
+                                report.unparseable,
+                                report.errors
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "auto-sync: email ingest failed");
+                        }
+                    }
+                    tokio::time::sleep(interval).await;
+                }
+            });
+        }
+    }
+
     let auth = match config.runtime.api_token.as_ref() {
         Some(token) => ApiAuth::Bearer(Arc::from(token.expose())),
         // Config validation only allows a missing token together with
@@ -260,4 +296,36 @@ async fn shutdown_signal() {
         () = ctrl_c => {},
         () = terminate => {},
     }
+}
+
+/// Runs a single email-OCR ingest cycle for the auto-sync background task.
+/// Reuses the same pipeline as the manual HTTP trigger and the CLI command.
+async fn run_auto_ingest(
+    pool: &sqlx::PgPool,
+    config: &ledgerguard::config::EmailIngestSettings,
+) -> anyhow::Result<email_ingest::IngestReport> {
+    let username = config
+        .imap_username
+        .as_ref()
+        .context("IMAP username not configured")?;
+    let password = config
+        .imap_password
+        .as_ref()
+        .context("IMAP password not configured")?;
+
+    let store = IngestStore::new(pool.clone());
+    let imap_config = email_ingest::imap_client::ImapConfig {
+        host: config.imap_host.clone(),
+        port: config.imap_port,
+        username: username.clone(),
+        password: password.expose().to_owned(),
+        sent_folder: config.sent_folder.clone(),
+        recipient_filter: config.recipient_filter.clone(),
+        subject_filter: config.subject_filter.clone(),
+        lookback_days: config.lookback_days,
+    };
+
+    email_ingest::run_ingest(imap_config, &store)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))
 }
