@@ -136,17 +136,13 @@
       <h2>Safe-to-spend</h2>
       <div class="fields">
         <label>Gotówka dostępna teraz <input id="available_cash" inputmode="decimal" value="0"></label>
-        <label>Koszty już zobowiązane <input id="committed_costs" inputmode="decimal" value="0"></label>
-        <label>Rezerwa PIT / podatek <input id="tax_reserve" inputmode="decimal" value="0"></label>
-        <label>Rezerwa VAT <input id="vat_reserve" inputmode="decimal" value="0"></label>
-        <label>ZUS / zdrowotna <input id="zus_reserve" inputmode="decimal" value="0"></label>
-        <label>Minimalny bufor gotówki <input id="minimum_cash_buffer" inputmode="decimal" value="0"></label>
+        <label>Podatki + rezerwy (PIT, VAT, ZUS, bufor) <input id="reserves_total" inputmode="decimal" value="0"></label>
         <label>Planowane wydatki <input id="planned_spend" inputmode="decimal" value="0"></label>
-        <label>Próg „ciasno” <input id="tight_threshold" inputmode="decimal" value="2000"></label>
       </div>
+      <div class="notice" style="margin-top:10px">Koszty bieżącego miesiąca (z faktur): <strong id="committed-display">0 zł</strong> <span style="color:#70798c">— auto z email-OCR</span></div>
       <div class="actions">
         <button id="evaluate">Policz teraz</button>
-        <button id="remember" class="secondary">Zapamiętaj wartości w tej przeglądarce</button>
+        <button id="remember" class="secondary">Zapamiętaj</button>
       </div>
       <div class="result">
         <div><div class="label">Możesz wydać</div><div class="big" id="safe">—</div></div>
@@ -154,6 +150,18 @@
         <div><div class="label">Decyzja</div><div class="big" id="decision">—</div></div>
       </div>
       <div class="notice" id="planner-note"></div>
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;color:#8b93a7;font-size:13px">Szczegóły rezerw i ustawienia</summary>
+        <div class="fields" style="margin-top:10px">
+          <label>Rezerwa PIT / podatek <input id="tax_reserve" inputmode="decimal" value="0"></label>
+          <label>Rezerwa VAT <input id="vat_reserve" inputmode="decimal" value="0"></label>
+          <label>ZUS / zdrowotna <input id="zus_reserve" inputmode="decimal" value="0"></label>
+          <label>Minimalny bufor gotówki <input id="minimum_cash_buffer" inputmode="decimal" value="0"></label>
+          <label>Próg „ciasno” <input id="tight_threshold" inputmode="decimal" value="2000"></label>
+          <label>Koszty już zobowiązane (nadpisz) <input id="committed_costs" inputmode="decimal" value="0"></label>
+        </div>
+        <div class="notice" id="reserves-sum" style="margin-top:8px">Suma rezerw: 0 zł</div>
+      </details>
     </article>
 
     <aside class="card side">
@@ -176,7 +184,7 @@
 </main>
 <script>
 (() => {
-  const ids = ["available_cash","committed_costs","tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer","planned_spend","tight_threshold"];
+  const ids = ["available_cash","committed_costs","tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer","planned_spend","tight_threshold","reserves_total"];
   const $ = id => document.getElementById(id);
   const tokenInput = $("token");
   tokenInput.value = localStorage.getItem("ledgerguard_token") || "";
@@ -195,16 +203,52 @@
     $("planner-note").textContent = "Usunięto uszkodzone lokalne wartości planera.";
   }
   if (remembered && typeof remembered === "object") {
-    ids.forEach(id => { if (remembered[id] !== undefined) $(id).value = remembered[id]; });
+    ids.forEach(id => { if (remembered[id] !== undefined && $(id)) $(id).value = remembered[id]; });
   }
+
+  // Auto-committed costs: filled from the current month's email-OCR costs.
+  // The user can override it in the advanced section.
+  let autoCommittedCosts = 0;
+
+  // Sync the combined "reserves_total" field with the individual reserve
+  // fields. When the user edits the combined field directly, the value is
+  // placed in tax_reserve and the others are zeroed (the API sums them all
+  // anyway, so the split doesn't affect the result).
+  function updateReservesTotal() {
+    const sum = parseFloat(money("tax_reserve")) + parseFloat(money("vat_reserve")) + parseFloat(money("zus_reserve")) + parseFloat(money("minimum_cash_buffer"));
+    $("reserves_total").value = sum.toFixed(2);
+    $("reserves-sum").textContent = `Suma rezerw: ${format(sum.toFixed(2))}`;
+  }
+  function distributeReserves() {
+    const total = parseFloat(money("reserves_total")) || 0;
+    // If the user edits the combined field, put everything in tax_reserve.
+    $("tax_reserve").value = total.toFixed(2);
+    $("vat_reserve").value = "0";
+    $("zus_reserve").value = "0";
+    $("minimum_cash_buffer").value = "0";
+    $("reserves-sum").textContent = `Suma rezerw: ${format(total.toFixed(2))}`;
+  }
+  // Wire up bidirectional sync: editing total distributes to individual;
+  // editing individual fields updates the total.
+  $("reserves_total").addEventListener("input", distributeReserves);
+  ["tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer"].forEach(id => {
+    $(id).addEventListener("input", updateReservesTotal);
+  });
+  // Initialize the combined field from stored individual values.
+  updateReservesTotal();
 
   const money = id => {
     const value = $(id).value.trim().replace(",", ".");
     return value === "" ? "0" : value;
   };
   const input = () => ({
-    available_cash: money("available_cash"), committed_costs: money("committed_costs"), tax_reserve: money("tax_reserve"),
-    vat_reserve: money("vat_reserve"), zus_reserve: money("zus_reserve"), minimum_cash_buffer: money("minimum_cash_buffer"), planned_spend: money("planned_spend")
+    available_cash: money("available_cash"),
+    committed_costs: (parseFloat(money("committed_costs")) || 0) > 0 ? money("committed_costs") : autoCommittedCosts.toFixed(2),
+    tax_reserve: money("tax_reserve"),
+    vat_reserve: money("vat_reserve"),
+    zus_reserve: money("zus_reserve"),
+    minimum_cash_buffer: money("minimum_cash_buffer"),
+    planned_spend: money("planned_spend")
   });
   const headers = () => {
     const h = {"content-type":"application/json"};
@@ -441,18 +485,26 @@
       const summary = await api("/v1/costs/summary");
       const el = $("costs-summary");
       el.innerHTML = "";
+
+      // Auto-fill committed costs from the current month's email-OCR total.
+      // The user can override this in the advanced section of the planner.
+      const monthlyTotal = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
+      autoCommittedCosts = monthlyTotal;
+      const committedOverride = parseFloat(money("committed_costs")) || 0;
+      const effectiveCommitted = committedOverride > 0 ? committedOverride : autoCommittedCosts;
+      $("committed-display").textContent = format(effectiveCommitted.toFixed(2));
+
       if (!summary.by_vendor.length) {
         el.innerHTML = "<p class='notice'>Brak kosztów email-OCR w tym miesiącu.</p>";
         return;
       }
-      const total = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
       const totalNet = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_net || 0), 0);
       const totalVat = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_vat || 0), 0);
       let html = `<table style="width:100%;border-collapse:collapse;margin-top:8px"><thead><tr><th style="text-align:left">Dostawca</th><th>Faktur</th><th>Netto</th><th>VAT</th><th>Brutto</th></tr></thead><tbody>`;
       for (const v of summary.by_vendor) {
         html += `<tr><td>${v.vendor}</td><td style="text-align:center">${v.invoice_count}</td><td>${format(v.total_net || "0")}</td><td>${format(v.total_vat || "0")}</td><td><strong>${format(v.total_gross)}</strong></td></tr>`;
       }
-      html += `</tbody><tfoot><tr style="border-top:1px solid #292f3d"><td><strong>Razem</strong></td><td></td><td><strong>${format(totalNet.toFixed(2))}</strong></td><td><strong>${format(totalVat.toFixed(2))}</strong></td><td><strong>${format(total.toFixed(2))}</strong></td></tr></tfoot></table>`;
+      html += `</tbody><tfoot><tr style="border-top:1px solid #292f3d"><td><strong>Razem</strong></td><td></td><td><strong>${format(totalNet.toFixed(2))}</strong></td><td><strong>${format(totalVat.toFixed(2))}</strong></td><td><strong>${format(monthlyTotal.toFixed(2))}</strong></td></tr></tfoot></table>`;
       if (summary.by_category.length) {
         html += `<h3 style="margin-top:16px">Kategorie</h3><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">`;
         for (const c of summary.by_category) {
