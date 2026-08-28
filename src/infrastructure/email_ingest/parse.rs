@@ -128,19 +128,30 @@ fn round2(value: Decimal) -> Decimal {
 
 // --- Regex patterns ---
 
+// Amount capture group inlined in each pattern: handles European
+// (1.234,56 / 1234,56 / 418,7) and US (1234.56) decimal formats, plus
+// bare integers (300). Uses 1-2 decimal digits for OCR text like "418,7".
+
 static GROSS_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 
 fn gross_patterns() -> &'static [Regex] {
     GROSS_PATTERNS.get_or_init(|| {
         [
             // Polish: "Brutto: 123,00 zł" / "Wartość brutto: 123,00"
-            r"(?i)(?:warto[śs][ćc]\s+)?brutto\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{2}|\d{1,6},\d{2}|\d{1,6}\.\d{2})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
-            // Polish: "Do zapłaty: 123,00 zł" / "Razem: 123,00"
-            r"(?i)(?:do\s+zap[łl]aty|razem|suma)\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{2}|\d{1,6},\d{2}|\d{1,6}\.\d{2})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)(?:warto[śs][ćc]\s+)?brutto\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "Do zapłaty: 123,00 zł" / "Razem: 123,00" / "Razem: 300 zł"
+            r"(?i)(?:do\s+zap[łl]aty|razem|suma)\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "Całkowita cena: 439,12 zł" (Audio Partner)
+            r"(?i)całkowita\s+cena\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Czech: "Celkem: 439,12 zł" (Audio Partner)
+            r"(?i)celkem\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // English: "Sub-total: 7.231,62 PLN" (Thomann)
+            r"(?i)sub-?total\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
             // German: "Gesamtbetrag: 123,00 EUR" / "Endbetrag: 123,00"
-            r"(?i)(?:gesamtbetrag|endbetrag|summe)\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{2}|\d{1,6},\d{2}|\d{1,6}\.\d{2})\s*(?:eur|€)?",
-            // Generic: "Total: 123.45"
-            r"(?i)total\s*[:\-]?\s*(\d{1,3}(?:,\d{3})*\.\d{2}|\d{1,6}\.\d{2})",
+            r"(?i)(?:gesamtbetrag|endbetrag|summe)\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:eur|€)?",
+            // English: "Total EUR 155,91" / "Total: 123.45" — allows optional
+            // currency label between "Total" and the amount (MUSIC STORE).
+            r"(?i)total\s*(?:eur|pln|zł)?\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})",
         ]
         .into_iter()
         .filter_map(|p| Regex::new(p).ok())
@@ -156,6 +167,10 @@ fn net_patterns() -> &'static [Regex] {
             r"(?i)(?:warto[śs][ćc]\s+)?netto\s*[:\-]?\s*([\d.\s,]+)\s*(?:z[łl]|pln|eur|usd|€|\$)?",
             r"(?i)netto-betrag\s*[:\-]?\s*([\d.\s,]+)\s*(?:eur|€)?",
             r"(?i)net\s*amount\s*[:\-]?\s*([\d.\s,]+)",
+            // English: "Value of goods: 7.455,28 PLN" (Thomann)
+            r"(?i)value\s+of\s+goods\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish/Czech: "Razem bez VAT: 418,7 zł" (Muziker)
+            r"(?i)razem\s+bez\s+vat\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
         ]
         .into_iter()
         .filter_map(|p| Regex::new(p).ok())
@@ -211,8 +226,8 @@ fn date_patterns() -> &'static [Regex] {
             r"(?i)data\s*[:\-]\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})",
             // German: "Datum: 15.01.2024" / "Rechnungsdatum: 2024-01-15"
             r"(?i)(?:rechnungs)?datum\s*[:\-]?\s*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}|\d{4}-\d{2}-\d{2})",
-            // English: "Date: 2024-01-15"
-            r"(?i)date\s*[:\-]\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})",
+            // English: "Invoice Date: 12.08.2026" / "Invoice Date 12.02.2026"
+            r"(?i)(?:invoice\s+)?date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})",
         ]
         .into_iter()
         .filter_map(|p| Regex::new(p).ok())
@@ -261,6 +276,12 @@ static KNOWN_VENDORS: &[&str] = &[
     "leroy merlin",
     "ob",
     "psb",
+    "music store",
+    "musicstore",
+    "audio partner",
+    "muziker",
+    "mol polska",
+    "somacare",
 ];
 
 fn extract_gross(text: &str) -> Option<Decimal> {
@@ -448,5 +469,63 @@ mod tests {
         let text = "Shell Polska\nPaliwo\nBrutto: 150,00 zł";
         let parsed = parse_invoice(text);
         assert_eq!(parsed.vendor.as_deref(), Some("shell"));
+    }
+
+    #[test]
+    fn parses_english_thomann_invoice_with_pln() {
+        // Real Thomann invoice format: English labels, European decimals, PLN.
+        let text = "Invoice Nr.: 91356438\nDate: 12.08.2026\nThomann GmbH\nValue of goods: 7.455,28 PLN\n3,00 % Discount: -223,66 PLN\nSub-total: 7.231,62 PLN\nBank transfer 7.231,62 PLN";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(723162, 2)));
+        assert_eq!(parsed.net, Some(Decimal::new(745528, 2)));
+        assert_eq!(
+            parsed.invoice_date,
+            Some(NaiveDate::from_ymd_opt(2026, 8, 12).unwrap())
+        );
+        assert_eq!(parsed.vendor.as_deref(), Some("thomann"));
+    }
+
+    #[test]
+    fn parses_music_store_invoice_total_eur() {
+        // MUSIC STORE format: "Total EUR 155,91" with currency label.
+        let text = "MUSIC STORE professional GmbH\nInvoice Date 12.02.2026\nTotal EUR 155,91\nTotal VAT 0,00";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(15591, 2)));
+        assert_eq!(
+            parsed.invoice_date,
+            Some(NaiveDate::from_ymd_opt(2026, 2, 12).unwrap())
+        );
+    }
+
+    #[test]
+    fn parses_audio_partner_czech_polish_labels() {
+        // Audio Partner: Czech "Celkem" and Polish "Całkowita cena".
+        let text =
+            "Faktura: FV25172048\nNabywca: WB Soft\nCelkem: 439,12 zł\nCałkowita cena: 439,12 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(43912, 2)));
+    }
+
+    #[test]
+    fn parses_muziker_one_decimal_place() {
+        // Muziker: "Razem: 418,7 zł" — only 1 decimal digit.
+        let text = "Faktura n.: 165673830\nRazem bez VAT: 418,7 zł\nRazem: 418,7 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(41870, 2)));
+        assert_eq!(parsed.net, Some(Decimal::new(41870, 2)));
+    }
+
+    #[test]
+    fn parses_somacare_integer_amount() {
+        // Somacare: "Razem do zapłaty: 300 zł" — integer, no decimal separator.
+        let text =
+            "Faktura nr FVB/2026/2946\nSprzedawca: Somacare Sp. z o.o.\nRazem do zapłaty: 300 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(30000, 2)));
     }
 }
