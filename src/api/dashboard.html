@@ -25,13 +25,14 @@
     .side { grid-column: span 4; }
     .label { color: #8e97aa; font-size: 12px; margin-bottom: 7px; }
     .big { font-size: 23px; font-weight: 720; letter-spacing: -.03em; }
+    .hero { font-size: 36px; font-weight: 800; letter-spacing: -.04em; }
     .muted { color: #8e97aa; }
     .ok { color: #74e0a8; }
     .warn { color: #ffc766; }
     .bad { color: #ff7d86; }
     .fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
     label { display: block; color: #aab2c4; font-size: 12px; }
-    input, button { width: 100%; border-radius: 11px; border: 1px solid #303747; background: #10131a; color: #f5f7fb; padding: 11px 12px; font: inherit; }
+    input, button, select { width: 100%; border-radius: 11px; border: 1px solid #303747; background: #10131a; color: #f5f7fb; padding: 11px 12px; font: inherit; }
     input { margin-top: 6px; }
     input:focus { outline: 2px solid #6673ff; outline-offset: 1px; }
     button { cursor: pointer; background: #edf0ff; color: #10121a; font-weight: 700; border: 0; }
@@ -45,12 +46,28 @@
     .notice { min-height: 21px; margin-top: 10px; font-size: 12px; color: #9ca4b7; }
     code { color: #cdd3e2; }
     footer { margin-top: 22px; color: #70798c; font-size: 12px; }
+    /* Tab navigation */
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #262b39; padding-bottom: 0; }
+    .tab-btn { padding: 10px 18px; border-radius: 11px 11px 0 0; border: 1px solid transparent; border-bottom: 0; background: transparent; color: #8e97aa; font-weight: 600; font-size: 14px; cursor: pointer; width: auto; }
+    .tab-btn:hover { color: #cdd3e2; background: rgba(30,37,51,.5); }
+    .tab-btn.active { color: #f5f7fb; background: rgba(20,23,32,.88); border-color: #262b39; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    /* Month selector */
+    .month-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .month-nav button { width: auto; padding: 8px 14px; }
+    .month-nav .month-label { font-size: 16px; font-weight: 600; color: #cdd3e2; min-width: 140px; text-align: center; }
+    /* Recent invoices list */
+    .invoice-list { margin-top: 12px; }
+    .invoice-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .invoice-list th { text-align: left; color: #8e97aa; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; border-bottom: 1px solid #292f3d; }
+    .invoice-list td { padding: 8px; border-bottom: 1px solid #1e2331; }
     @media (min-width: 1000px) {
   .month-card { grid-column: span 7; }
   .month-card + .card.side { grid-column: span 5; }
 }
-@media (max-width: 820px) { .status, .planner, .side { grid-column: span 12; } header { align-items: flex-start; flex-direction: column; } }
-    @media (max-width: 560px) { main { width: min(100% - 20px, 1080px); padding-top: 24px; } .fields, .result, .actions { grid-template-columns: 1fr; } }
+@media (max-width: 820px) { .status, .planner, .side { grid-column: span 12; } header { align-items: flex-start; flex-direction: column; } .tab-btn { padding: 8px 12px; font-size: 13px; } }
+    @media (max-width: 560px) { main { width: min(100% - 20px, 1080px); padding-top: 24px; } .fields, .result, .actions { grid-template-columns: 1fr; } .tabs { flex-wrap: wrap; } }
   </style>
 </head>
 <body>
@@ -64,33 +81,150 @@
     <span class="pill" id="connection">API: niepołączone</span>
   </header>
 
-  <section class="grid">
-    <article class="card status">
-      <div class="label">Provider</div>
-      <div class="big" id="provider">—</div>
-      <div class="notice" id="provider-detail">Wpisz token API poniżej.</div>
-    </article>
-    <article class="card status">
-      <div class="label">Live sync</div>
-      <div class="big" id="sync-state">—</div>
-      <div class="notice" id="sync-detail">—</div>
-    </article>
-    <article class="card status">
-      <div class="label">Wersja</div>
-      <div class="big" id="version">—</div>
-      <div class="notice">lokalny serwis LedgerGuard</div>
-    </article>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="costs">Koszty</button>
+    <button class="tab-btn" data-tab="planner">Planer</button>
+    <button class="tab-btn" data-tab="settings">Ustawienia</button>
+  </nav>
 
-    <article class="card planner month-card" style="background:rgba(16,20,28,.92)">
-      <h2>Ten miesiac z Saldeo</h2>
-      <div class="result" style="margin-top:12px;border-top:0;padding-top:0">
-        <div><div class="label">Przychody</div><div class="big ok" id="month-income">&mdash;</div></div>
-        <div><div class="label">Koszty</div><div class="big bad" id="month-costs">&mdash;</div></div>
-        <div><div class="label">Netto</div><div class="big" id="month-net">&mdash;</div></div>
-      </div>
-      <div class="notice" id="month-detail">Wczytuje...</div>
-      <details style="margin-top:12px">
-        <summary style="cursor:pointer;color:#8b93a7;font-size:13px">+ Dodaj pozycję ręcznie</summary>
+  <!-- ==================== TAB: OVERVIEW ==================== -->
+  <section class="tab-content active" data-tab="overview">
+    <div class="grid">
+      <article class="card status">
+        <div class="label">Safe-to-spend</div>
+        <div class="hero" id="overview-safe">—</div>
+        <div class="notice" id="overview-safe-detail">Ustaw gotówkę w zakładce Planer, aby obliczyć.</div>
+      </article>
+      <article class="card status">
+        <div class="label">Koszty tego miesiąca</div>
+        <div class="big bad" id="overview-costs">—</div>
+        <div class="notice" id="overview-costs-detail">—</div>
+      </article>
+      <article class="card status">
+        <div class="label">Netto (plan)</div>
+        <div class="big" id="overview-net">—</div>
+        <div class="notice" id="overview-net-detail">—</div>
+      </article>
+
+      <article class="card planner month-card" style="background:rgba(16,20,28,.92)">
+        <h2>Ten miesiąc</h2>
+        <div class="result" style="margin-top:12px;border-top:0;padding-top:0">
+          <div><div class="label">Przychody</div><div class="big ok" id="month-income">&mdash;</div></div>
+          <div><div class="label">Koszty</div><div class="big bad" id="month-costs">&mdash;</div></div>
+          <div><div class="label">Netto</div><div class="big" id="month-net">&mdash;</div></div>
+        </div>
+        <div class="notice" id="month-detail">Wczytuje...</div>
+        <div class="invoice-list" id="recent-invoices"></div>
+      </article>
+
+      <aside class="card side">
+        <h2>Czy mogę to kupić?</h2>
+        <p class="notice" style="margin:0 0 10px">Porównuje planowany wydatek z budżetem kosztów i tym, co już tego miesiąca wydano.</p>
+        <label>Kwota brutto <input id="afford-amount" inputmode="decimal" placeholder="np. 1500"></label>
+        <button id="afford" style="margin-top:12px">Sprawdź</button>
+        <div class="notice" id="afford-result">—</div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ==================== TAB: KOSZTY ==================== -->
+  <section class="tab-content" data-tab="costs">
+    <div class="grid">
+      <article class="card">
+        <h2>Koszty z email-OCR</h2>
+        <div class="month-nav">
+          <button id="costs-prev" class="secondary">← Poprzedni</button>
+          <span class="month-label" id="costs-month-label">—</span>
+          <button id="costs-next" class="secondary">Następny →</button>
+        </div>
+        <p class="notice" style="margin:0 0 10px">Faktury kosztowe przesłane na dok.saldeo.pl, rozpoznane automatycznie z załączników PDF.</p>
+        <div class="actions" style="margin-bottom:12px">
+          <button id="ingest-email" class="secondary">Uruchom ingest teraz</button>
+          <button id="load-costs" class="secondary">Odśwież podsumowanie</button>
+        </div>
+        <div class="notice" id="ingest-result"></div>
+        <div id="costs-summary"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ==================== TAB: PLANER ==================== -->
+  <section class="tab-content" data-tab="planner">
+    <div class="grid">
+      <article class="card planner">
+        <h2>Safe-to-spend</h2>
+        <div class="fields">
+          <label>Gotówka dostępna teraz <input id="available_cash" inputmode="decimal" value="0"></label>
+          <label>Podatki + rezerwy (PIT, VAT, ZUS, bufor) <input id="reserves_total" inputmode="decimal" value="0"></label>
+          <label>Planowane wydatki <input id="planned_spend" inputmode="decimal" value="0"></label>
+        </div>
+        <div class="notice" style="margin-top:10px">Koszty bieżącego miesiąca (z faktur): <strong id="committed-display">0 zł</strong> <span style="color:#70798c">— auto z email-OCR</span></div>
+        <div class="actions">
+          <button id="evaluate">Policz teraz</button>
+          <button id="remember" class="secondary">Zapamiętaj</button>
+        </div>
+        <div class="result">
+          <div><div class="label">Możesz wydać</div><div class="big" id="safe">—</div></div>
+          <div><div class="label">Headroom</div><div class="big" id="headroom">—</div></div>
+          <div><div class="label">Decyzja</div><div class="big" id="decision">—</div></div>
+        </div>
+        <div class="notice" id="planner-note"></div>
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;color:#8b93a7;font-size:13px">Szczegóły rezerw i ustawienia</summary>
+          <div class="fields" style="margin-top:10px">
+            <label>Rezerwa PIT / podatek <input id="tax_reserve" inputmode="decimal" value="0"></label>
+            <label>Rezerwa VAT <input id="vat_reserve" inputmode="decimal" value="0"></label>
+            <label>ZUS / zdrowotna <input id="zus_reserve" inputmode="decimal" value="0"></label>
+            <label>Minimalny bufor gotówki <input id="minimum_cash_buffer" inputmode="decimal" value="0"></label>
+            <label>Próg „ciasno” <input id="tight_threshold" inputmode="decimal" value="2000"></label>
+            <label>Koszty już zobowiązane (nadpisz) <input id="committed_costs" inputmode="decimal" value="0"></label>
+          </div>
+          <div class="notice" id="reserves-sum" style="margin-top:8px">Suma rezerw: 0 zł</div>
+        </details>
+      </article>
+
+      <aside class="card side">
+        <h2>Zakup testowy</h2>
+        <label>Kwota brutto <input id="purchase" inputmode="decimal" value="0"></label>
+        <button id="simulate" style="margin-top:12px">Czy mogę to kupić?</button>
+        <div class="notice" id="purchase-result">—</div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ==================== TAB: USTAWIENIA ==================== -->
+  <section class="tab-content" data-tab="settings">
+    <div class="grid">
+      <article class="card status">
+        <div class="label">Provider</div>
+        <div class="big" id="provider">—</div>
+        <div class="notice" id="provider-detail">Wpisz token API poniżej.</div>
+      </article>
+      <article class="card status">
+        <div class="label">Live sync</div>
+        <div class="big" id="sync-state">—</div>
+        <div class="notice" id="sync-detail">—</div>
+      </article>
+      <article class="card status">
+        <div class="label">Wersja</div>
+        <div class="big" id="version">—</div>
+        <div class="notice">lokalny serwis LedgerGuard</div>
+      </article>
+
+      <article class="card planner">
+        <h2>Połączenie</h2>
+        <div class="token-row">
+          <label>Bearer token <input id="token" type="password" autocomplete="off" placeholder="LEDGERGUARD_API_TOKEN"></label>
+          <button id="connect" class="secondary">Połącz</button>
+        </div>
+        <div class="notice">Token trafia wyłącznie do <code>localStorage</code> tej przeglądarki i nie jest wysyłany nigdzie poza tym serwisem. <button id="forget-token" class="secondary" style="display:inline;width:auto;padding:2px 8px;font-size:11px;margin-left:4px">Zapomnij token</button></div>
+        <button id="sync" class="secondary" style="margin-top:12px">Synchronizuj bieżący miesiąc</button>
+        <div class="notice" id="sync-result"></div>
+      </article>
+
+      <aside class="card side">
+        <h2>Dodaj pozycję ręcznie</h2>
         <div class="fields" style="margin-top:10px">
           <label>Typ
             <select id="manual-kind"><option value="expense">Koszt</option><option value="revenue">Przychód</option></select>
@@ -101,85 +235,19 @@
         </div>
         <button id="manual-add" class="secondary" style="margin-top:10px">Zapisz pozycję</button>
         <div class="notice" id="manual-result">Wpis trafi do księgi z źródłem „manual”.</div>
-      </details>
-    </article>
+      </aside>
 
-    <aside class="card side">
-      <h2>Linki Thomann</h2>
-      <p class="notice" style="margin:0 0 10px">Wklej linki Thomann (po jednym w linii) — konwertuje na affiliate i zaczytuje ceny.</p>
-      <textarea id="thomann-urls" rows="4" style="width:100%;border-radius:11px;border:1px solid #303747;background:#10131a;color:#f5f7fb;padding:11px 12px;font:inherit;resize:vertical;margin-bottom:10px" placeholder="thomann.de/de/...&#10;thomann.pl/pl/..."></textarea>
-      <button id="thomann-resolve" class="secondary">Rozwiąż linki</button>
-      <div class="notice" id="thomann-result">—</div>
-      <div id="thomann-items" style="margin-top:10px"></div>
-    </aside>
-
-    <article class="card">
-      <h2>Koszty z email-OCR</h2>
-      <p class="notice" style="margin:0 0 10px">Faktury kosztowe przesłane na dok.saldeo.pl, rozpoznane automatycznie z załączników PDF.</p>
-      <div class="actions" style="margin-bottom:12px">
-        <button id="ingest-email" class="secondary">Uruchom ingest teraz</button>
-        <button id="load-costs" class="secondary">Odśwież podsumowanie</button>
-      </div>
-      <div class="notice" id="ingest-result"></div>
-      <div id="costs-summary"></div>
-    </article>
-
-    <aside class="card side">
-      <h2>Czy moge to kupic?</h2>
-      <p class="notice" style="margin:0 0 10px">Porownuje planowany wydatek z budzetem kosztow i tym, co juz tego miesiaca wydano.</p>
-      <label>Kwota brutto <input id="afford-amount" inputmode="decimal" placeholder="np. 1500"></label>
-      <button id="afford" style="margin-top:12px">Sprawdz</button>
-      <div class="notice" id="afford-result">—</div>
-    </aside>
-
-    <article class="card planner">
-      <h2>Safe-to-spend</h2>
-      <div class="fields">
-        <label>Gotówka dostępna teraz <input id="available_cash" inputmode="decimal" value="0"></label>
-        <label>Podatki + rezerwy (PIT, VAT, ZUS, bufor) <input id="reserves_total" inputmode="decimal" value="0"></label>
-        <label>Planowane wydatki <input id="planned_spend" inputmode="decimal" value="0"></label>
-      </div>
-      <div class="notice" style="margin-top:10px">Koszty bieżącego miesiąca (z faktur): <strong id="committed-display">0 zł</strong> <span style="color:#70798c">— auto z email-OCR</span></div>
-      <div class="actions">
-        <button id="evaluate">Policz teraz</button>
-        <button id="remember" class="secondary">Zapamiętaj</button>
-      </div>
-      <div class="result">
-        <div><div class="label">Możesz wydać</div><div class="big" id="safe">—</div></div>
-        <div><div class="label">Headroom</div><div class="big" id="headroom">—</div></div>
-        <div><div class="label">Decyzja</div><div class="big" id="decision">—</div></div>
-      </div>
-      <div class="notice" id="planner-note"></div>
-      <details style="margin-top:12px">
-        <summary style="cursor:pointer;color:#8b93a7;font-size:13px">Szczegóły rezerw i ustawienia</summary>
-        <div class="fields" style="margin-top:10px">
-          <label>Rezerwa PIT / podatek <input id="tax_reserve" inputmode="decimal" value="0"></label>
-          <label>Rezerwa VAT <input id="vat_reserve" inputmode="decimal" value="0"></label>
-          <label>ZUS / zdrowotna <input id="zus_reserve" inputmode="decimal" value="0"></label>
-          <label>Minimalny bufor gotówki <input id="minimum_cash_buffer" inputmode="decimal" value="0"></label>
-          <label>Próg „ciasno” <input id="tight_threshold" inputmode="decimal" value="2000"></label>
-          <label>Koszty już zobowiązane (nadpisz) <input id="committed_costs" inputmode="decimal" value="0"></label>
-        </div>
-        <div class="notice" id="reserves-sum" style="margin-top:8px">Suma rezerw: 0 zł</div>
-      </details>
-    </article>
-
-    <aside class="card side">
-      <h2>Zakup testowy</h2>
-      <label>Kwota brutto <input id="purchase" inputmode="decimal" value="0"></label>
-      <button id="simulate" style="margin-top:12px">Czy mogę to kupić?</button>
-      <div class="notice" id="purchase-result">—</div>
-      <hr style="border:0;border-top:1px solid #292f3d;margin:20px 0">
-      <h2>Połączenie</h2>
-      <div class="token-row">
-        <label>Bearer token <input id="token" type="password" autocomplete="off" placeholder="LEDGERGUARD_API_TOKEN"></label>
-        <button id="connect" class="secondary">Połącz</button>
-      </div>
-      <div class="notice">Token trafia wyłącznie do <code>localStorage</code> tej przeglądarki i nie jest wysyłany nigdzie poza tym serwisem. <button id="forget-token" class="secondary" style="display:inline;width:auto;padding:2px 8px;font-size:11px;margin-left:4px">Zapomnij token</button></div>
-      <button id="sync" class="secondary" style="margin-top:12px">Synchronizuj bieżący miesiąc</button>
-      <div class="notice" id="sync-result"></div>
-    </aside>
+      <aside class="card side">
+        <h2>Linki Thomann</h2>
+        <p class="notice" style="margin:0 0 10px">Wklej linki Thomann (po jednym w linii) — konwertuje na affiliate i zaczytuje ceny.</p>
+        <textarea id="thomann-urls" rows="4" style="width:100%;border-radius:11px;border:1px solid #303747;background:#10131a;color:#f5f7fb;padding:11px 12px;font:inherit;resize:vertical;margin-bottom:10px" placeholder="thomann.de/de/...&#10;thomann.pl/pl/..."></textarea>
+        <button id="thomann-resolve" class="secondary">Rozwiąż linki</button>
+        <div class="notice" id="thomann-result">—</div>
+        <div id="thomann-items" style="margin-top:10px"></div>
+      </aside>
+    </div>
   </section>
+
   <footer>Accounting facts pozostają po stronie systemu księgowego. LedgerGuard pokazuje plan i bufor, nie zastępuje księgowości.</footer>
 </main>
 <script>
@@ -236,6 +304,40 @@
   });
   // Initialize the combined field from stored individual values.
   updateReservesTotal();
+
+  // --- Tab navigation ---
+  function switchTab(name) {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+    document.querySelectorAll(".tab-content").forEach(s => s.classList.toggle("active", s.dataset.tab === name));
+    localStorage.setItem("ledgerguard_tab", name);
+  }
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.addEventListener("click", () => switchTab(b.dataset.tab));
+  });
+  // Restore last active tab.
+  const savedTab = localStorage.getItem("ledgerguard_tab");
+  if (savedTab && document.querySelector(`.tab-content[data-tab="${savedTab}"]`)) switchTab(savedTab);
+
+  // --- Month selector for costs tab ---
+  let costsYear, costsMonth;
+  function initCostsMonth() {
+    const now = new Date();
+    costsYear = now.getFullYear();
+    costsMonth = now.getMonth() + 1;
+  }
+  initCostsMonth();
+  const monthNames = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"];
+  function updateCostsLabel() {
+    $("costs-month-label").textContent = `${monthNames[costsMonth - 1]} ${costsYear}`;
+  }
+  $("costs-prev").onclick = () => {
+    costsMonth--; if (costsMonth < 1) { costsMonth = 12; costsYear--; }
+    updateCostsLabel(); loadCosts(costsYear, costsMonth);
+  };
+  $("costs-next").onclick = () => {
+    costsMonth++; if (costsMonth > 12) { costsMonth = 1; costsYear++; }
+    updateCostsLabel(); loadCosts(costsYear, costsMonth);
+  };
 
   const money = id => {
     const value = $(id).value.trim().replace(",", ".");
@@ -310,6 +412,12 @@
     $("headroom").textContent = format(result.headroom);
     $("decision").textContent = result.decision.toUpperCase();
     $("decision").className = `big ${decisionClass(result.decision)}`;
+    // Mirror to overview tab
+    $("overview-safe").textContent = format(result.safe_to_spend);
+    $("overview-safe").className = `hero ${decisionClass(result.decision)}`;
+    $("overview-safe-detail").textContent = `Headroom: ${format(result.headroom)} — ${result.decision}`;
+    // Persist last result so overview shows it on reload
+    localStorage.setItem("ledgerguard_last_result", JSON.stringify(result));
   }
   function renderPurchaseResult(result) {
     const container = $("purchase-result");
@@ -412,20 +520,48 @@
       netEl.textContent = format(displayNet.toFixed(2));
       netEl.className = `big ${displayNet < 0 ? "bad" : "ok"}`;
       const projectionNote = projected ? " (plan)" : "";
-      $("month-detail").textContent = `${m.entries} pozycji w ksiedze${projectionNote}. ${m.budget_configured ? "" : "Ustaw budzet, aby widziec werdykt."}`;
+      $("month-detail").textContent = `${m.entries} pozycji w księdze${projectionNote}. ${m.budget_configured ? "" : "Ustaw budżet, aby widzieć werdykt."}`;
+
+      // Mirror to overview status cards
+      $("overview-costs").textContent = format(costs.toFixed(2));
+      $("overview-costs-detail").textContent = `${m.entries} pozycji w księdze${projectionNote}`;
+      $("overview-net").textContent = format(displayNet.toFixed(2));
+      $("overview-net").className = `big ${displayNet < 0 ? "bad" : "ok"}`;
+      $("overview-net-detail").textContent = projected ? "Przychód jako plan" : "Przychód rzeczywisty";
+
+      // Render recent invoices in overview
+      renderRecentInvoices(m.recent || []);
     } catch (e) {
-      $("month-detail").textContent = `Blad: ${e.message}`;
+      $("month-detail").textContent = `Błąd: ${e.message}`;
     }
+  }
+
+  function renderRecentInvoices(recent) {
+    const el = $("recent-invoices");
+    if (!recent.length) {
+      el.innerHTML = "";
+      return;
+    }
+    let html = `<h3 style="margin-top:16px;font-size:14px;color:#8b93a7">Ostatnie faktury</h3><table><thead><tr><th>Data</th><th>Dostawca</th><th>Kategoria</th><th style="text-align:right">Brutto</th></tr></thead><tbody>`;
+    for (const r of recent) {
+      const date = r.booked_on;
+      const vendor = r.counterparty || "—";
+      const cat = r.category || "—";
+      const gross = r.gross;
+      html += `<tr><td>${date}</td><td>${vendor}</td><td style="color:#8e97aa">${cat}</td><td style="text-align:right"><strong>${format(gross)}</strong></td></tr>`;
+    }
+    html += `</tbody></table>`;
+    el.innerHTML = html;
   }
 
   $("afford").onclick = async () => {
     const amount = $("afford-amount").value.trim().replace(",", ".");
-    if (!amount) { $("afford-result").textContent = "Podaj kwote."; return; }
+    if (!amount) { $("afford-result").textContent = "Podaj kwotę."; return; }
     try {
       const v = await api(`/v1/planner/affordability?amount=${encodeURIComponent(amount)}`);
       const verdict = document.createElement("strong");
       verdict.className = v.decision ? decisionClass(v.decision) : "warn";
-      verdict.textContent = v.decision ? v.decision.toUpperCase() : "BRAK BUDZETU";
+      verdict.textContent = v.decision ? v.decision.toUpperCase() : "BRAK BUDŻETU";
       const detail = document.createElement("div");
       detail.textContent = `${v.message} Koszty MTD: ${format(v.costs)}.`;
       if (v.headroom !== null) {
@@ -480,31 +616,39 @@
     } catch (e) { $("thomann-result").textContent = e.message; }
   };
 
-  async function loadCosts() {
+  async function loadCosts(year, month) {
     try {
-      const summary = await api("/v1/costs/summary");
+      const params = new URLSearchParams();
+      if (year !== undefined) params.set("year", year);
+      if (month !== undefined) params.set("month", month);
+      const qs = params.toString();
+      const summary = await api(`/v1/costs/summary${qs ? "?" + qs : ""}`);
       const el = $("costs-summary");
       el.innerHTML = "";
 
       // Auto-fill committed costs from the current month's email-OCR total.
       // The user can override this in the advanced section of the planner.
-      const monthlyTotal = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
-      autoCommittedCosts = monthlyTotal;
-      const committedOverride = parseFloat(money("committed_costs")) || 0;
-      const effectiveCommitted = committedOverride > 0 ? committedOverride : autoCommittedCosts;
-      $("committed-display").textContent = format(effectiveCommitted.toFixed(2));
+      // Only update auto-committed for the current month (no year/month override).
+      if (year === undefined && month === undefined) {
+        const monthlyTotal = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
+        autoCommittedCosts = monthlyTotal;
+        const committedOverride = parseFloat(money("committed_costs")) || 0;
+        const effectiveCommitted = committedOverride > 0 ? committedOverride : autoCommittedCosts;
+        $("committed-display").textContent = format(effectiveCommitted.toFixed(2));
+      }
 
       if (!summary.by_vendor.length) {
         el.innerHTML = "<p class='notice'>Brak kosztów email-OCR w tym miesiącu.</p>";
         return;
       }
+      const total = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
       const totalNet = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_net || 0), 0);
       const totalVat = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_vat || 0), 0);
       let html = `<table style="width:100%;border-collapse:collapse;margin-top:8px"><thead><tr><th style="text-align:left">Dostawca</th><th>Faktur</th><th>Netto</th><th>VAT</th><th>Brutto</th></tr></thead><tbody>`;
       for (const v of summary.by_vendor) {
         html += `<tr><td>${v.vendor}</td><td style="text-align:center">${v.invoice_count}</td><td>${format(v.total_net || "0")}</td><td>${format(v.total_vat || "0")}</td><td><strong>${format(v.total_gross)}</strong></td></tr>`;
       }
-      html += `</tbody><tfoot><tr style="border-top:1px solid #292f3d"><td><strong>Razem</strong></td><td></td><td><strong>${format(totalNet.toFixed(2))}</strong></td><td><strong>${format(totalVat.toFixed(2))}</strong></td><td><strong>${format(monthlyTotal.toFixed(2))}</strong></td></tr></tfoot></table>`;
+      html += `</tbody><tfoot><tr style="border-top:1px solid #292f3d"><td><strong>Razem</strong></td><td></td><td><strong>${format(totalNet.toFixed(2))}</strong></td><td><strong>${format(totalVat.toFixed(2))}</strong></td><td><strong>${format(total.toFixed(2))}</strong></td></tr></tfoot></table>`;
       if (summary.by_category.length) {
         html += `<h3 style="margin-top:16px">Kategorie</h3><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">`;
         for (const c of summary.by_category) {
@@ -517,6 +661,7 @@
       $("costs-summary").innerHTML = `<p class="notice">Błąd: ${e.message}</p>`;
     }
   }
+  updateCostsLabel();
 
   $("ingest-email").onclick = async () => {
     $("ingest-result").textContent = "Uruchamiam w tle…";
@@ -536,13 +681,13 @@
       const poll = async () => {
         polls++;
         try {
-          await loadCosts();
+          await loadCosts(costsYear, costsMonth);
           await loadMonth();
           const docs = await api("/v1/ingest/documents?limit=500");
           const afterCount = docs.documents ? docs.documents.length : 0;
           const newDocs = afterCount - beforeCount;
           if (newDocs > 0) {
-            $("ingest-result").textContent = `Zaladowano ${newDocs} nowych dokumentów. Koszty zaktualizowane.`;
+            $("ingest-result").textContent = `Załadowano ${newDocs} nowych dokumentów. Koszty zaktualizowane.`;
           } else if (polls >= maxPolls) {
             $("ingest-result").textContent = "Brak nowych dokumentów. Wszystkie faktury z tego okresu były już przetworzone.";
           } else {
@@ -554,7 +699,17 @@
       setTimeout(poll, 5000);
     } catch (e) { $("ingest-result").textContent = `Błąd: ${e.message}`; }
   };
-  $("load-costs").onclick = loadCosts;
+  $("load-costs").onclick = () => loadCosts(costsYear, costsMonth);
+
+  // Restore last planner result to overview on page load
+  try {
+    const lastResult = JSON.parse(localStorage.getItem("ledgerguard_last_result") || "null");
+    if (lastResult) {
+      $("overview-safe").textContent = format(lastResult.safe_to_spend);
+      $("overview-safe").className = `hero ${decisionClass(lastResult.decision)}`;
+      $("overview-safe-detail").textContent = `Headroom: ${format(lastResult.headroom)} — ${lastResult.decision}`;
+    }
+  } catch (_) {}
 
   // Auto-load data if a device token or bootstrap token is already stored —
   // avoids 401 console errors on first visit when no credentials are available.
@@ -564,7 +719,7 @@
     loadCosts();
     status();
   } else {
-    $("month-detail").textContent = "Wpisz token API w sekcji „Połączenie”, aby załadować dane.";
+    $("month-detail").textContent = "Wpisz token API w zakładce Ustawienia, aby załadować dane.";
     $("costs-summary").innerHTML = "<p class='notice'>Połącz się z API, aby zobaczyć koszty.</p>";
   }
 })();
