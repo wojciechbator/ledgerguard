@@ -24,12 +24,18 @@ pub struct ParsedInvoice {
 /// - Gas station receipts: "Brutto: 250,00 zł", "VAT 23%", "PKO"
 /// - Amounts use comma as decimal separator (Polish/European convention)
 pub fn parse_invoice(text: &str) -> ParsedInvoice {
-    let vendor = extract_vendor(text);
-    let invoice_date = extract_date(text);
-    let gross = extract_gross(text);
-    let net = extract_net(text);
-    let vat = extract_vat(text);
-    let vat_rate = extract_vat_rate(text);
+    // Pre-process OCR artifacts in the full text before regex matching.
+    // Tesseract on scanned receipts often misreads '?' for ',' in numbers,
+    // 'O' for '0', etc. Fixing these in the raw text ensures the regex
+    // patterns can match amounts that contain OCR errors.
+    let cleaned_text = fix_ocr_artifacts(text);
+
+    let vendor = extract_vendor(&cleaned_text);
+    let invoice_date = extract_date(&cleaned_text);
+    let gross = extract_gross(&cleaned_text);
+    let net = extract_net(&cleaned_text);
+    let vat = extract_vat(&cleaned_text);
+    let vat_rate = extract_vat_rate(&cleaned_text);
 
     let mut result = ParsedInvoice {
         vendor,
@@ -45,6 +51,29 @@ pub fn parse_invoice(text: &str) -> ParsedInvoice {
         && let (Some(net), Some(vat)) = (result.net, result.vat)
     {
         result.gross = Some(net + vat);
+    }
+
+    // If we have net + vat_rate but no gross and no vat, compute gross
+    // from net * (1 + rate/100). Handles gas station receipts where we
+    // can read "Netto: 173,35" and "Kwota A: 23,00%" but not the VAT amount.
+    if result.gross.is_none()
+        && result.vat.is_none()
+        && let (Some(net), Some(rate)) = (result.net, result.vat_rate)
+        && rate > Decimal::ZERO
+    {
+        let gross = net * (Decimal::ONE + rate / Decimal::from(100));
+        let vat = gross - net;
+        result.gross = Some(round2(gross));
+        result.vat = Some(round2(vat));
+    }
+
+    // If we still have no gross but have net, use net as gross. This is
+    // a fallback for 0% VAT invoices (intra-EU reverse charge) where
+    // net = gross, e.g. Thomann PLN invoices with no VAT breakdown.
+    if result.gross.is_none()
+        && let Some(net) = result.net
+    {
+        result.gross = Some(net);
     }
 
     // If we have gross + net but no vat, compute it.
@@ -71,6 +100,32 @@ pub fn parse_invoice(text: &str) -> ParsedInvoice {
 }
 
 // --- Amount parsing ---
+
+/// Fixes common OCR character confusions in numeric strings. Tesseract on
+/// scanned receipts often misreads: '?' → ',', 'O' → '0', 'l' → '1', '|'
+/// → '1'. Only applies to characters that appear adjacent to digits, so
+/// text labels are not corrupted.
+fn fix_ocr_artifacts(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+        let next = chars.get(i + 1).copied();
+        let adjacent_digit =
+            prev.is_some_and(|p| p.is_ascii_digit()) || next.is_some_and(|n| n.is_ascii_digit());
+        if !adjacent_digit {
+            out.push(c);
+            continue;
+        }
+        match c {
+            '?' => out.push(','),
+            'O' => out.push('0'),
+            '|' => out.push('1'),
+            _ => out.push(c),
+        }
+    }
+    out
+}
 
 /// Parses a Polish/European decimal amount: "1.234,56" or "1234,56" or "1234.56".
 /// Handles thousand separators (dots or spaces) and comma/slash decimal separators.
@@ -140,17 +195,22 @@ fn gross_patterns() -> &'static [Regex] {
             // Polish: "Brutto: 123,00 zł" / "Wartość brutto: 123,00"
             // Uses [ \t] (not \s) to prevent matching across newlines —
             // a product code on the next line must not be captured.
-            r"(?i)(?:warto[śs][ćc][ \t]+)?brutto[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
-            // Polish: "Do zapłaty: 123,00 zł" / "Razem: 123,00" / "Razem: 300 zł"
-            r"(?i)(?:do[ \t]+zap[łl]aty|razem|suma)[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Allows optional currency between label and amount for
+            // scanned receipts: "SUMA PLN 213,22".
+            r"(?i)(?:warto[śs][ćc][ \t]+)?brutto[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish: "Do zapłaty: 123,00 zł" / "Razem: 123,00" / "SUMA PLN 213,22"
+            r"(?i)(?:do[ \t]+zap[łl]aty|razem|suma)[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish: "Całkowita cena: 439,12 zł" (Audio Partner)
-            r"(?i)całkowita[ \t]+cena[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)całkowita[ \t]+cena[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Czech: "Celkem: 439,12 zł" (Audio Partner)
-            r"(?i)celkem[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)celkem[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // English: "Sub-total: 7.231,62 PLN" (Thomann)
-            r"(?i)sub-?total[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)sub-?total[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // English: "Bank transfer  1.001,62 PLN" / "Cash on delivery  1.201,63 PLN"
+            // (Thomann invoices without Sub-total — payment method line is the total)
+            r"(?i)(?:bank[ \t]+transfer|cash[ \t]+on[ \t]+delivery)[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // German: "Gesamtbetrag: 123,00 EUR" / "Endbetrag: 123,00"
-            r"(?i)(?:gesamtbetrag|endbetrag|summe)[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:eur|€)?",
+            r"(?i)(?:gesamtbetrag|endbetrag|summe)[ \t]*[:\-]?[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:eur|€)?",
             // English: "Total EUR 155,91" / "Total: 123.45" — allows optional
             // currency label between "Total" and the amount (MUSIC STORE).
             r"(?i)total[ \t]*(?:eur|pln|zł)?[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})",
@@ -190,6 +250,9 @@ fn vat_patterns() -> &'static [Regex] {
             r"(?i)(?:kwota\s+)?vat\s*(?:\d+%)?\s*[:\-]\s*([\d.\s,]+)\s*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish: "VAT: 23,00" — colon required
             r"(?i)vat\s*[:\-]\s*([\d.\s,]+)\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Polish gas station: "Kwota A: 23,00% 48,25" — the VAT amount
+            // follows the rate on the same line (Circle K, Orlen receipts).
+            r"(?i)kwota[ \t]+[a-z][ \t]*[:\-]?[ \t]*\d+[.,]?\d*%[ \t]*([\d.\s,]+)",
             // German: "zzgl. 19% USt: 23,00 EUR" / "USt: 23,00"
             r"(?i)(?:zzgl\.?\s*)?\d+%?\s*ust\s*[:\-]?\s*([\d.\s,]+)\s*(?:eur|€)?",
         ]
@@ -210,6 +273,8 @@ fn vat_rate_patterns() -> &'static [Regex] {
             r"(?i)(\d+(?:[.,]\d+)?)\s*%\s*ust",
             // "Steuersatz: 19%"
             r"(?i)steuersatz\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*%",
+            // Polish gas station: "Kwota A: 23,00%" (Circle K, Orlen)
+            r"(?i)kwota[ \t]+[a-z][ \t]*[:\-]?[ \t]*(\d+(?:[.,]\d+)?)\s*%",
         ]
         .into_iter()
         .filter_map(|p| Regex::new(p).ok())
@@ -539,5 +604,59 @@ mod tests {
         let parsed = parse_invoice(text);
 
         assert_eq!(parsed.gross, Some(Decimal::new(41870, 2)));
+    }
+
+    #[test]
+    fn parses_thomann_cash_on_delivery() {
+        // Thomann COD invoice: no Sub-total, total is on "Cash on delivery" line.
+        let text = "Invoice Nr.: 91346010\nDate: 12.08.2026\nThomann GmbH\nValue of goods: 1.201,63 PLN\nCash on delivery 1.201,63 PLN";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(120163, 2)));
+        assert_eq!(parsed.net, Some(Decimal::new(120163, 2)));
+    }
+
+    #[test]
+    fn parses_thomann_bank_transfer_without_subtotal() {
+        // Thomann invoice with Bank transfer but no Sub-total line.
+        let text = "Invoice Nr.: 83615429\nDate: 15.10.2025\nThomann GmbH\nValue of goods: 1.001,62 PLN\nBank transfer 1.001,62 PLN";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(100162, 2)));
+    }
+
+    #[test]
+    fn parses_scanned_circle_k_receipt() {
+        // Circle K gas station receipt (OCR text from Tesseract):
+        // "SUMA PLN 213,22" with currency between label and amount.
+        // "Kwota A: 23,00%" for VAT rate, "Netto: 173,35" for net.
+        let text = "Circle K Polska Sp. z o.o.\nNIP 7790001083\nFAKTURA NR:\nMILES 95 (P2)\n37,94 litry * 5,62 zł 213,22\nKwota A: 23,00% 39,87\nNetto: 173,35\nSUMA PLN 213,22";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(21322, 2)));
+        assert_eq!(parsed.net, Some(Decimal::new(17335, 2)));
+        assert_eq!(parsed.vat_rate, Some(Decimal::new(23, 0)));
+    }
+
+    #[test]
+    fn parses_ocr_artifact_question_mark_as_comma() {
+        // OCR reads "2091?9" instead of "2091,9" — ? adjacent to digits.
+        let text = "Circle K\nNetto: 2091?9\nSUMA PLN 2592?94\nKwota A: 23,00%";
+        let parsed = parse_invoice(text);
+
+        // SUMA should be parsed with ? → , fix: 2592,94
+        assert!(parsed.gross.is_some());
+        assert_eq!(parsed.gross, Some(Decimal::new(259294, 2)));
+    }
+
+    #[test]
+    fn computes_gross_from_net_and_vat_rate() {
+        // Gas station receipt: net=173,35, vat_rate=23%, no gross label found.
+        // Parser should compute gross = 173,35 * 1.23 = 213,22.
+        let text = "Circle K\nNetto: 173,35\nKwota A: 23,00%";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(21322, 2)));
+        assert_eq!(parsed.vat, Some(Decimal::new(3987, 2)));
     }
 }
