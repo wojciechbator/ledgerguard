@@ -24,10 +24,15 @@ const VENDOR_PATTERNS: &[(&str, &str, &str)] = &[
     (r"circle\s*k", "Circle K", "fuel"),
     (r"moya", "Moya", "fuel"),
     (r"energy\s*and\s*transport", "Energy and Transport", "fuel"),
+    (r"mol\s*polska", "MOL Polska", "fuel"),
     // Music / audio equipment
     (r"thomann", "Thomann", "equipment"),
     (r"bax-shop|bax\s*shop", "Bax Shop", "equipment"),
     (r"thomann\.de", "Thomann", "equipment"),
+    (r"muziker", "Muziker", "equipment"),
+    (r"music\s*store", "MUSIC STORE", "equipment"),
+    (r"audio\s*partner", "Audio Partner", "equipment"),
+    (r"audio\s*complex", "Audio Complex", "equipment"),
     // Electronics / hardware
     (r"media\s*expert", "Media Expert", "electronics"),
     (r"rtv\s*euro\s*agd", "RTV Euro AGD", "electronics"),
@@ -82,6 +87,8 @@ const VENDOR_PATTERNS: &[(&str, &str, &str)] = &[
     (r"saldeo", "SaldeoSMART", "accounting"),
     (r"infakt", "inFakt", "accounting"),
     (r"fakturownia", "Fakturownia", "accounting"),
+    // Health / medical
+    (r"somacare", "Somacare", "health"),
 ];
 
 /// Category patterns based on invoice text content, used as a fallback when
