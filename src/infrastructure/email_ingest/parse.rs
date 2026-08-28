@@ -138,20 +138,22 @@ fn gross_patterns() -> &'static [Regex] {
     GROSS_PATTERNS.get_or_init(|| {
         [
             // Polish: "Brutto: 123,00 zł" / "Wartość brutto: 123,00"
-            r"(?i)(?:warto[śs][ćc]\s+)?brutto\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            // Uses [ \t] (not \s) to prevent matching across newlines —
+            // a product code on the next line must not be captured.
+            r"(?i)(?:warto[śs][ćc][ \t]+)?brutto[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish: "Do zapłaty: 123,00 zł" / "Razem: 123,00" / "Razem: 300 zł"
-            r"(?i)(?:do\s+zap[łl]aty|razem|suma)\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)(?:do[ \t]+zap[łl]aty|razem|suma)[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Polish: "Całkowita cena: 439,12 zł" (Audio Partner)
-            r"(?i)całkowita\s+cena\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)całkowita[ \t]+cena[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // Czech: "Celkem: 439,12 zł" (Audio Partner)
-            r"(?i)celkem\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)celkem[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // English: "Sub-total: 7.231,62 PLN" (Thomann)
-            r"(?i)sub-?total\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:z[łl]|pln|eur|usd|€|\$)?",
+            r"(?i)sub-?total[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:z[łl]|pln|eur|usd|€|\$)?",
             // German: "Gesamtbetrag: 123,00 EUR" / "Endbetrag: 123,00"
-            r"(?i)(?:gesamtbetrag|endbetrag|summe)\s*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})\s*(?:eur|€)?",
+            r"(?i)(?:gesamtbetrag|endbetrag|summe)[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})[ \t]*(?:eur|€)?",
             // English: "Total EUR 155,91" / "Total: 123.45" — allows optional
             // currency label between "Total" and the amount (MUSIC STORE).
-            r"(?i)total\s*(?:eur|pln|zł)?\s*[:\-]?\s*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})",
+            r"(?i)total[ \t]*(?:eur|pln|zł)?[ \t]*[:\-]?[ \t]*(\d{1,3}(?:[. ]\d{3})*,\d{1,2}|\d{1,6},\d{1,2}|\d{1,6}\.\d{1,2}|\d{1,6})",
         ]
         .into_iter()
         .filter_map(|p| Regex::new(p).ok())
@@ -527,5 +529,15 @@ mod tests {
         let parsed = parse_invoice(text);
 
         assert_eq!(parsed.gross, Some(Decimal::new(30000, 2)));
+    }
+
+    #[test]
+    fn does_not_match_product_code_across_newline() {
+        // Muziker: "brutto" in column header, product code "1208024" on next
+        // line. Must NOT match 120802 as gross — real total is "Razem: 418,7".
+        let text = "Kod     Nazwa     Ilość    Cena bez VAT    Razem brutto\n1208024  Paradise   1.0      418,7 zł        418,7 zł\nRazem bez VAT: 418,7 zł\nRazem: 418,7 zł";
+        let parsed = parse_invoice(text);
+
+        assert_eq!(parsed.gross, Some(Decimal::new(41870, 2)));
     }
 }
