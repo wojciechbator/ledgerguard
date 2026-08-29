@@ -64,13 +64,21 @@
     .invoice-list td { padding: 8px; border-bottom: 1px solid #1e2331; }
     .badge { background: #1e2533; padding: 4px 10px; border-radius: 4px; font-size: 12px; }
     /* Trends chart */
-    .bar-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; }
+    .bar-container { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; }
     .bar { width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; transition: height .3s; }
     .bar.ok { background: linear-gradient(to top, #2a7a52, #74e0a8); }
     .bar.warn { background: linear-gradient(to top, #8a6a2a, #ffc766); }
     .bar.bad { background: linear-gradient(to top, #8a2a32, #ff7d86); }
     .bar-label { flex: 1; min-width: 0; font-size: 10px; color: #8e97aa; margin-top: 4px; text-align: center; white-space: nowrap; overflow: hidden; }
     .bar-value { font-size: 10px; color: #aab2c4; margin-bottom: 2px; white-space: nowrap; }
+    /* Cost progress bar */
+    .cost-progress-wrap { margin-top: 14px; }
+    .cost-progress-label { font-size: 12px; color: #8e97aa; margin-bottom: 6px; }
+    .cost-progress-track { height: 10px; background: #1a1d24; border-radius: 5px; overflow: hidden; border: 1px solid #262b39; }
+    .cost-progress-fill { height: 100%; border-radius: 5px; transition: width .4s ease, background .3s; }
+    .cost-progress-fill.ok { background: linear-gradient(to right, #2a7a52, #74e0a8); }
+    .cost-progress-fill.warn { background: linear-gradient(to right, #8a6a2a, #ffc766); }
+    .cost-progress-fill.bad { background: linear-gradient(to right, #8a2a32, #ff7d86); }
     @media (min-width: 1000px) {
   .month-card { grid-column: span 7; }
   .month-card + .card.side { grid-column: span 5; }
@@ -93,7 +101,7 @@
   <nav class="tabs">
     <button class="tab-btn active" data-tab="overview">Overview</button>
     <button class="tab-btn" data-tab="costs">Koszty</button>
-    <button class="tab-btn" data-tab="planner">Planer</button>
+    <button class="tab-btn" data-tab="thomann">Thomann</button>
     <button class="tab-btn" data-tab="settings">Ustawienia</button>
   </nav>
 
@@ -101,17 +109,17 @@
   <section class="tab-content active" data-tab="overview">
     <div class="grid">
       <article class="card status">
-        <div class="label">Safe-to-spend</div>
-        <div class="hero" id="overview-safe">—</div>
-        <div class="notice" id="overview-safe-detail">Ustaw gotówkę w zakładce Planer, aby obliczyć.</div>
-      </article>
-      <article class="card status">
         <div class="label">Koszty tego miesiąca</div>
         <div class="big bad" id="overview-costs">—</div>
         <div class="notice" id="overview-costs-detail">—</div>
       </article>
       <article class="card status">
-        <div class="label">Netto (plan)</div>
+        <div class="label">Przychody (plan)</div>
+        <div class="big ok" id="overview-income">—</div>
+        <div class="notice" id="overview-income-detail">—</div>
+      </article>
+      <article class="card status">
+        <div class="label">Netto</div>
         <div class="big" id="overview-net">—</div>
         <div class="notice" id="overview-net-detail">—</div>
       </article>
@@ -119,11 +127,18 @@
       <article class="card planner month-card" style="background:rgba(16,20,28,.92)">
         <h2>Ten miesiąc</h2>
         <div class="result" style="margin-top:12px;border-top:0;padding-top:0">
-          <div><div class="label">Przychody</div><div class="big ok" id="month-income">&mdash;</div></div>
-          <div><div class="label">Koszty</div><div class="big bad" id="month-costs">&mdash;</div></div>
-          <div><div class="label">Netto</div><div class="big" id="month-net">&mdash;</div></div>
+          <div><div class="label">Przychody</div><div class="hero ok" id="month-income" style="font-size:28px">&mdash;</div></div>
+          <div><div class="label">Koszty</div><div class="hero bad" id="month-costs" style="font-size:28px">&mdash;</div></div>
+          <div><div class="label">Netto</div><div class="hero" id="month-net" style="font-size:28px">&mdash;</div></div>
         </div>
-        <div class="notice" id="month-detail">Wczytuje...</div>
+        <div class="cost-progress-wrap" style="margin-top:16px">
+          <div class="cost-progress-label">Koszty vs przychody: <span id="cost-ratio">—</span></div>
+          <div class="cost-progress-track">
+            <div class="cost-progress-fill" id="cost-progress-fill" style="width:0%"></div>
+          </div>
+          <div class="notice" id="cost-verdict" style="margin-top:6px">—</div>
+        </div>
+        <div class="notice" id="month-detail" style="margin-top:12px">Wczytuje...</div>
         <div class="invoice-list" id="recent-invoices"></div>
       </article>
 
@@ -165,48 +180,29 @@
     </div>
   </section>
 
-  <!-- ==================== TAB: PLANER ==================== -->
-  <section class="tab-content" data-tab="planner">
+  <!-- ==================== TAB: THOMANN ==================== -->
+  <section class="tab-content" data-tab="thomann">
     <div class="grid">
       <article class="card planner">
-        <h2>Safe-to-spend</h2>
-        <div class="fields">
-          <label>Gotówka dostępna teraz <input id="available_cash" inputmode="decimal" value="0"></label>
-          <label>Planowane wydatki <input id="planned_spend" inputmode="decimal" value="0"></label>
+        <h2>Thomann Basket Checker</h2>
+        <p class="notice" style="margin:0 0 10px">Wklej linki Thomann (po jednym w linii). Narzędzie przekonwertuje je na linki afiliacyjne, sprawdzi ceny i oceni czy zakup mieści się w budżecie.</p>
+        <textarea id="thomann-links" rows="4" style="width:100%;border-radius:11px;border:1px solid #303747;background:#10131a;color:#f5f7fb;padding:11px 12px;font:inherit;resize:vertical;margin-bottom:10px" placeholder="https://www.thomann.de/de/shure_sm7b_vocal_mikrofon.htm&#10;https://www.thomann.de/de/rode_nt1_5th_gen.htm"></textarea>
+        <div class="actions" style="margin-bottom:12px">
+          <button id="thomann-check">Sprawdź ceny i budżet</button>
+          <button id="thomann-copy" class="secondary" style="display:none">Kopiuj linki afiliacyjne</button>
         </div>
-        <div class="notice" style="margin-top:10px">Koszty bieżącego miesiąca (z faktur): <strong id="committed-display">0 zł</strong> <span style="color:#70798c">— auto z email-OCR</span></div>
-        <div class="notice" id="tax-breakdown" style="margin-top:6px">Podatki + rezerwy: <strong id="reserves-total-display">0 zł</strong> <span style="color:#70798c">— auto (PIT + VAT + ZUS + zdrowotna + bufor)</span></div>
-        <div class="actions">
-          <button id="evaluate">Policz teraz</button>
-          <button id="remember" class="secondary">Zapamiętaj</button>
-        </div>
-        <div class="result">
-          <div><div class="label">Możesz wydać</div><div class="big" id="safe">—</div></div>
-          <div><div class="label">Headroom</div><div class="big" id="headroom">—</div></div>
-          <div><div class="label">Decyzja</div><div class="big" id="decision">—</div></div>
-        </div>
-        <div class="notice" id="planner-note"></div>
-        <details style="margin-top:12px">
-          <summary style="cursor:pointer;color:#8b93a7;font-size:13px">Szczegóły rezerw i ustawienia</summary>
-          <div class="fields" style="margin-top:10px">
-            <label>PIT (auto — <span id="pit-rate">12</span>%) <input id="tax_reserve" inputmode="decimal" value="0"></label>
-            <label>VAT (auto — <span id="vat-rate">23</span>% kosztów) <input id="vat_reserve" inputmode="decimal" value="0"></label>
-            <label>ZUS <input id="zus_reserve" inputmode="decimal" value="0"></label>
-            <label>Zdrowotna <input id="health_reserve" inputmode="decimal" value="0"></label>
-            <label>Minimalny bufor gotówki <input id="minimum_cash_buffer" inputmode="decimal" value="0"></label>
-            <label>Próg „ciasno” <input id="tight_threshold" inputmode="decimal" value="2000"></label>
-            <label>Koszty już zobowiązane (nadpisz) <input id="committed_costs" inputmode="decimal" value="0"></label>
-            <label>Suma rezerw (nadpisz wszystko) <input id="reserves_total" inputmode="decimal" value="0"></label>
-          </div>
-          <div class="notice" id="reserves-sum" style="margin-top:8px">Suma rezerw: 0 zł</div>
-        </details>
+        <div class="notice" id="thomann-status"></div>
+        <div id="thomann-result"></div>
       </article>
 
       <aside class="card side">
-        <h2>Zakup testowy</h2>
-        <label>Kwota brutto <input id="purchase" inputmode="decimal" value="0"></label>
-        <button id="simulate" style="margin-top:12px">Czy mogę to kupić?</button>
-        <div class="notice" id="purchase-result">—</div>
+        <h2>Budżet miesięczny</h2>
+        <div class="fields" style="margin-top:10px">
+          <label>Oczekiwany dochód (PLN) <input id="thomann-income" inputmode="decimal" value="26500"></label>
+          <label>Budżet kosztów (PLN) <input id="thomann-budget" inputmode="decimal" placeholder="np. 15000"></label>
+        </div>
+        <button id="thomann-save-budget" class="secondary" style="margin-top:10px">Zapisz budżet</button>
+        <div class="notice" id="thomann-budget-status"></div>
       </aside>
     </div>
   </section>
@@ -255,14 +251,6 @@
         <div class="notice" id="manual-result">Wpis trafi do księgi z źródłem „manual”.</div>
       </aside>
 
-      <aside class="card side">
-        <h2>Linki Thomann</h2>
-        <p class="notice" style="margin:0 0 10px">Wklej linki Thomann (po jednym w linii) — konwertuje na affiliate i zaczytuje ceny.</p>
-        <textarea id="thomann-urls" rows="4" style="width:100%;border-radius:11px;border:1px solid #303747;background:#10131a;color:#f5f7fb;padding:11px 12px;font:inherit;resize:vertical;margin-bottom:10px" placeholder="thomann.de/de/...&#10;thomann.pl/pl/..."></textarea>
-        <button id="thomann-resolve" class="secondary">Rozwiąż linki</button>
-        <div class="notice" id="thomann-result">—</div>
-        <div id="thomann-items" style="margin-top:10px"></div>
-      </aside>
     </div>
   </section>
 
@@ -270,7 +258,6 @@
 </main>
 <script>
 (() => {
-  const ids = ["available_cash","committed_costs","tax_reserve","vat_reserve","zus_reserve","minimum_cash_buffer","planned_spend","tight_threshold","reserves_total","health_reserve"];
   const $ = id => document.getElementById(id);
   const tokenInput = $("token");
   tokenInput.value = localStorage.getItem("ledgerguard_token") || "";
@@ -281,57 +268,8 @@
   // only as a fallback for re-issuing if the device token is revoked.
   let activeToken = localStorage.getItem("ledgerguard_device_token") || "";
 
-  let remembered = null;
-  try {
-    remembered = JSON.parse(localStorage.getItem("ledgerguard_planner") || "null");
-  } catch (_) {
-    localStorage.removeItem("ledgerguard_planner");
-    $("planner-note").textContent = "Usunięto uszkodzone lokalne wartości planera.";
-  }
-  if (remembered && typeof remembered === "object") {
-    ids.forEach(id => { if (remembered[id] !== undefined && $(id)) $(id).value = remembered[id]; });
-  }
-
-  // Auto-committed costs: filled from the current month's email-OCR costs.
-  // The user can override it in the advanced section.
-  let autoCommittedCosts = 0;
-
-  const money = id => {
-    const value = $(id).value.trim().replace(",", ".");
-    return value === "" ? "0" : value;
-  };
   const format = value => `${value} zł`;
   const decisionClass = value => value === "healthy" ? "ok" : value === "tight" ? "warn" : "bad";
-
-  // Sync the combined "reserves_total" field with the individual reserve
-  // fields. When the user edits the combined field directly, the value is
-  // placed in tax_reserve and the others are zeroed (the API sums them all
-  // anyway, so the split doesn't affect the result).
-  function updateReservesTotal() {
-    const sum = parseFloat(money("tax_reserve")) + parseFloat(money("vat_reserve")) + parseFloat(money("zus_reserve")) + parseFloat(money("health_reserve")) + parseFloat(money("minimum_cash_buffer"));
-    $("reserves_total").value = sum.toFixed(2);
-    $("reserves-sum").textContent = `Suma rezerw: ${format(sum.toFixed(2))}`;
-    $("reserves-total-display").textContent = format(sum.toFixed(2));
-  }
-  function distributeReserves() {
-    const total = parseFloat(money("reserves_total")) || 0;
-    // If the user edits the combined field, put everything in tax_reserve.
-    $("tax_reserve").value = total.toFixed(2);
-    $("vat_reserve").value = "0";
-    $("zus_reserve").value = "0";
-    $("health_reserve").value = "0";
-    $("minimum_cash_buffer").value = "0";
-    $("reserves-sum").textContent = `Suma rezerw: ${format(total.toFixed(2))}`;
-    $("reserves-total-display").textContent = format(total.toFixed(2));
-  }
-  // Wire up bidirectional sync: editing total distributes to individual;
-  // editing individual fields updates the total.
-  $("reserves_total").addEventListener("input", distributeReserves);
-  ["tax_reserve","vat_reserve","zus_reserve","health_reserve","minimum_cash_buffer"].forEach(id => {
-    $(id).addEventListener("input", updateReservesTotal);
-  });
-  // Initialize the combined field from stored individual values.
-  updateReservesTotal();
 
   // --- Tab navigation ---
   function switchTab(name) {
@@ -367,17 +305,6 @@
     updateCostsLabel(); loadCosts(costsYear, costsMonth);
   };
 
-  const input = () => ({
-    available_cash: money("available_cash"),
-    committed_costs: (parseFloat(money("committed_costs")) || 0) > 0 ? money("committed_costs") : autoCommittedCosts.toFixed(2),
-    tax_reserve: money("tax_reserve"),
-    vat_reserve: money("vat_reserve"),
-    // Combine ZUS + health insurance into the single zus_reserve field
-    // the backend expects.
-    zus_reserve: (parseFloat(money("zus_reserve")) + parseFloat(money("health_reserve"))).toFixed(2),
-    minimum_cash_buffer: money("minimum_cash_buffer"),
-    planned_spend: money("planned_spend")
-  });
   const headers = () => {
     const h = {"content-type":"application/json"};
     const token = activeToken || tokenInput.value.trim();
@@ -425,38 +352,6 @@
       $("provider-detail").textContent = e.message;
     }
   }
-  async function evaluate(path, purchaseGross) {
-    const payload = {input: input(), policy: {tight_threshold: money("tight_threshold")}};
-    if (purchaseGross !== undefined) payload.purchase_gross = purchaseGross;
-    return api(path, {method:"POST", body:JSON.stringify(payload)});
-  }
-  function renderResult(result) {
-    $("safe").textContent = format(result.safe_to_spend);
-    $("headroom").textContent = format(result.headroom);
-    $("decision").textContent = result.decision.toUpperCase();
-    $("decision").className = `big ${decisionClass(result.decision)}`;
-    // Mirror to overview tab
-    $("overview-safe").textContent = format(result.safe_to_spend);
-    $("overview-safe").className = `hero ${decisionClass(result.decision)}`;
-    $("overview-safe-detail").textContent = `Headroom: ${format(result.headroom)} — ${result.decision}`;
-    // Persist last result so overview shows it on reload
-    localStorage.setItem("ledgerguard_last_result", JSON.stringify(result));
-  }
-  function renderPurchaseResult(result) {
-    const container = $("purchase-result");
-    const decision = document.createElement("strong");
-    decision.className = decisionClass(result.decision);
-    decision.textContent = result.decision.toUpperCase();
-
-    const first = document.createElement("div");
-    first.append("Po zakupie: ", decision);
-    const safe = document.createElement("div");
-    safe.textContent = `safe-to-spend: ${format(result.safe_to_spend)}`;
-    const headroom = document.createElement("div");
-    headroom.textContent = `headroom: ${format(result.headroom)}`;
-    container.replaceChildren(first, safe, headroom);
-  }
-
   $("connect").onclick = async () => {
     const bootstrap = tokenInput.value.trim();
     if (!bootstrap) { $("sync-result").textContent = "Wpisz token najpierw."; return; }
@@ -487,7 +382,7 @@
     }
 
     try {
-      await Promise.all([status(), loadMonth(), loadCosts(), loadTrends(), loadTaxEstimate()]);
+      await Promise.all([status(), loadMonth(), loadCosts(), loadTrends(), loadThomannBudget()]);
       $("sync-result").textContent = activeToken !== bootstrap
         ? "✓ Połączono (token urządzenia aktywny)."
         : "✓ Połączono z API.";
@@ -501,21 +396,6 @@
     activeToken = "";
     tokenInput.value = "";
     $("sync-result").textContent = "Token usunięty z tej przeglądarki.";
-  };
-  $("remember").onclick = () => {
-    const values = {}; ids.forEach(id => values[id] = $(id).value);
-    localStorage.setItem("ledgerguard_planner", JSON.stringify(values));
-    $("planner-note").textContent = "Wartości zapisane lokalnie w tej przeglądarce.";
-  };
-  $("evaluate").onclick = async () => {
-    try { const body = await evaluate("/v1/planner/evaluate"); renderResult(body.result); $("planner-note").textContent = ""; }
-    catch (e) { $("planner-note").textContent = e.message; }
-  };
-  $("simulate").onclick = async () => {
-    try {
-      const body = await evaluate("/v1/planner/simulate", money("purchase"));
-      renderPurchaseResult(body.result);
-    } catch (e) { $("purchase-result").textContent = e.message; }
   };
   $("sync").onclick = async () => {
     const now = new Date();
@@ -541,13 +421,33 @@
       $("month-costs").textContent = format(m.costs);
       const netEl = $("month-net");
       netEl.textContent = format(displayNet.toFixed(2));
-      netEl.className = `big ${displayNet < 0 ? "bad" : "ok"}`;
+      netEl.className = `hero ${displayNet < 0 ? "bad" : "ok"}`;
       const projectionNote = projected ? " (plan)" : "";
-      $("month-detail").textContent = `${m.entries} pozycji w księdze${projectionNote}. ${m.budget_configured ? "" : "Ustaw budżet, aby widzieć werdykt."}`;
+      $("month-detail").textContent = `${m.entries} pozycji w księdze${projectionNote}.`;
+
+      // Cost-to-income progress bar
+      const ratio = displayIncome > 0 ? (costs / displayIncome) * 100 : 0;
+      const fillEl = $("cost-progress-fill");
+      fillEl.style.width = Math.min(ratio, 100) + "%";
+      fillEl.className = "cost-progress-fill " + (ratio > 90 ? "bad" : ratio > 70 ? "warn" : "ok");
+      $("cost-ratio").textContent = ratio.toFixed(1) + "%";
+      const verdictEl = $("cost-verdict");
+      if (ratio > 90) {
+        verdictEl.textContent = "Przekroczone — koszty pochłaniają ponad 90% przychodów.";
+        verdictEl.className = "notice bad";
+      } else if (ratio > 70) {
+        verdictEl.textContent = "Uważaj — koszty zbliżają się do progu.";
+        verdictEl.className = "notice warn";
+      } else {
+        verdictEl.textContent = "Bezpiecznie — koszty pod kontrolą.";
+        verdictEl.className = "notice ok";
+      }
 
       // Mirror to overview status cards
       $("overview-costs").textContent = format(costs.toFixed(2));
       $("overview-costs-detail").textContent = `${m.entries} pozycji w księdze${projectionNote}`;
+      $("overview-income").textContent = format(displayIncome.toFixed(2));
+      $("overview-income-detail").textContent = projected ? "Przychód jako plan" : "Przychód rzeczywisty";
       $("overview-net").textContent = format(displayNet.toFixed(2));
       $("overview-net").className = `big ${displayNet < 0 ? "bad" : "ok"}`;
       $("overview-net-detail").textContent = projected ? "Przychód jako plan" : "Przychód rzeczywisty";
@@ -611,32 +511,136 @@
     } catch (e) { $("manual-result").textContent = e.message; }
   };
 
-  $("thomann-resolve").onclick = async () => {
-    const raw = $("thomann-urls").value.trim();
-    if (!raw) { $("thomann-result").textContent = "Wklej przynajmniej jeden link."; return; }
+  // --- Thomann tab ---
+  $("thomann-check").onclick = async () => {
+    const raw = $("thomann-links").value.trim();
+    if (!raw) { $("thomann-status").textContent = "Wklej linki."; return; }
     const urls = raw.split("\n").map(s => s.trim()).filter(Boolean);
-    if (!urls.length) { $("thomann-result").textContent = "Wklej przynajmniej jeden link."; return; }
-    $("thomann-result").textContent = `Rozwiązuję ${urls.length} linków…`;
-    $("thomann-items").innerHTML = "";
+    if (!urls.length) { $("thomann-status").textContent = "Wklej linky."; return; }
+    $("thomann-status").textContent = `Sprawdzam ${urls.length} linków…`;
+    $("thomann-check").disabled = true;
+    $("thomann-copy").style.display = "none";
+    $("thomann-result").innerHTML = "";
     try {
-      const r = await api("/v1/thomann/resolve", { method: "POST", body: JSON.stringify({ urls }) });
-      const el = $("thomann-items");
-      el.innerHTML = "";
-      let html = "";
-      for (const item of r.items) {
-        const price = item.price ? `${item.price} ${item.currency || ""}` : "—";
-        const title = item.title || item.original_url;
-        const err = item.error ? ` <span style="color:#ff7d86">${item.error}</span>` : "";
-        html += `<div style="padding:8px 0;border-bottom:1px solid #292f3d"><div style="font-size:13px;color:#cdd3e2">${title}</div><div style="font-size:12px;color:#8e97aa;margin-top:2px">${price}${err}</div><a href="${item.affiliate_url}" target="_blank" rel="noopener" style="font-size:12px;color:#6673ff;word-break:break-all">link affiliate →</a></div>`;
+      const data = await api("/v1/thomann/resolve", { method: "POST", body: JSON.stringify({ urls }) });
+
+      // Client-side fallback: if server was blocked by Cloudflare, try
+      // fetching from the browser (not subject to the same blocks).
+      let totalFromClient = 0;
+      let currencyFromClient = null;
+      const needsClientFetch = data.items.some(i => i.error && !i.price);
+      if (needsClientFetch) {
+        $("thomann-status").textContent = "Serwer zablokowany — próbuję z przeglądarki…";
+        for (const item of data.items) {
+          if (!item.error) continue;
+          try {
+            const resp = await fetch(item.affiliate_url, { mode: "cors" });
+            if (resp.ok) {
+              const html = await resp.text();
+              const m = html.match(/"price"\s*:\s*"?(\d+[.,]?\d*)"?/);
+              if (m) {
+                const val = parseFloat(m[1].replace(".", "").replace(",", "."));
+                if (!isNaN(val)) {
+                  item.price = m[1].replace(",", ".");
+                  item.currency = html.includes("€") ? "EUR" : html.includes("PLN") ? "PLN" : null;
+                  item.error = null;
+                  totalFromClient += val;
+                  if (!currencyFromClient) currencyFromClient = item.currency;
+                }
+              }
+              const tm = html.match(/<title>(.*?)<\/title>/);
+              if (tm) item.title = tm[1].split(" – ")[0].trim();
+            }
+          } catch (e) { /* CORS blocked — keep server error */ }
+        }
+        if (totalFromClient > 0) {
+          data.total = totalFromClient.toFixed(2);
+          data.currency = currencyFromClient;
+          data.resolvable_count = data.items.filter(i => i.price).length;
+        }
       }
-      if (r.resolvable_count > 0) {
-        html += `<div style="margin-top:10px;font-size:13px"><strong>Suma: ${r.total} ${r.currency || ""}</strong> (${r.resolvable_count} pozycji)</div>`;
+
+      // Affordability verdict
+      let verdictHtml = "";
+      if (data.total && parseFloat(data.total) > 0) {
+        try {
+          const afford = await api(`/v1/planner/affordability?amount=${encodeURIComponent(data.total)}`);
+          const cls = afford.decision ? afford.decision.toLowerCase() : "unknown";
+          const label = afford.decision ? afford.decision.toUpperCase() : "BRAK BUDŻETU";
+          const expectedIncome = parseFloat(afford.expected_monthly_income);
+          const costsMtd = parseFloat(afford.costs);
+          const basketTotal = parseFloat(data.total);
+          const projectedNet = expectedIncome - costsMtd - basketTotal;
+          const detail = `${afford.message} Koszty MTD: ${format(afford.costs)}.`;
+          const headroom = afford.headroom !== null ? `<div style="font-size:.85rem;margin-top:4px">Pozostaje w budżecie: ${format(afford.headroom)}</div>` : "";
+          const incomeLine = `<div style="font-size:.85rem;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.1)">Oczekiwany dochód: ${format(afford.expected_monthly_income)} PLN</div><div style="font-size:.85rem;margin-top:2px">Projekcja netto po zakupie: <strong>${projectedNet >= 0 ? "+" : ""}${format(projectedNet.toFixed(2))} PLN</strong></div>`;
+          verdictHtml = `<div style="padding:16px;border-radius:10px;margin-top:12px;text-align:center;font-size:1.1rem;font-weight:bold" class="${cls === 'healthy' ? 'ok' : cls === 'tight' ? 'warn' : cls === 'blocked' ? 'bad' : 'muted'}" >${label}<div style="font-size:.85rem;font-weight:normal;margin-top:4px">${detail}</div>${headroom}${incomeLine}</div>`;
+        } catch (e) {
+          verdictHtml = `<div class="notice" style="margin-top:12px">Nie udało się sprawdzić budżetu: ${e.message}</div>`;
+        }
       }
-      el.innerHTML = html;
-      $("thomann-result").textContent = r.resolvable_count > 0
-        ? `Rozwiązano ${r.resolvable_count}/${r.items.length} linków.`
-        : `Brak cen do zaczytania (${r.items.length} linków).`;
-    } catch (e) { $("thomann-result").textContent = e.message; }
+
+      // Results table
+      let tableHtml = "";
+      if (data.items.length) {
+        tableHtml = `<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px"><thead><tr><th style="text-align:left">Produkt</th><th>Cena</th><th>Status</th></tr></thead><tbody>`;
+        for (const item of data.items) {
+          const title = item.title || item.original_url.split("/").pop()?.replace(/\.htm$/, "") || "—";
+          const price = item.price ? `<strong>${format(item.price)}</strong> ${item.currency || ""}` : "—";
+          const status = item.error ? `<span class="bad">${item.error}</span>` : "✓";
+          tableHtml += `<tr><td>${title}</td><td style="text-align:right;white-space:nowrap">${price}</td><td>${status}</td></tr>`;
+        }
+        tableHtml += `</tbody></table>`;
+      }
+
+      const totalHtml = data.total && parseFloat(data.total) > 0
+        ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:2px solid #292f3d;margin-top:8px;font-size:1.2rem;font-weight:bold"><span>Razem (${data.resolvable_count} pozycji)</span><span>${format(data.total)} ${data.currency || ""}</span></div>`
+        : "";
+
+      // Affiliate links box
+      const affiliateLinks = data.items.filter(i => !i.error).map(i => i.affiliate_url).join("\n");
+      const linksHtml = affiliateLinks
+        ? `<div style="margin-top:12px"><h2 style="font-size:14px;margin-bottom:8px">Linki afiliacyjne</h2><textarea id="thomann-affiliate-output" readonly style="width:100%;height:80px;font-size:.8rem;border-radius:11px;border:1px solid #303747;background:#10131a;color:#f5f7fb;padding:11px 12px;font:inherit;resize:vertical">${affiliateLinks}</textarea></div>`
+        : "";
+
+      $("thomann-result").innerHTML = tableHtml + totalHtml + verdictHtml + linksHtml;
+      $("thomann-status").textContent = `${data.resolvable_count}/${data.items.length} linków rozwiązanych.`;
+      $("thomann-copy").style.display = affiliateLinks ? "inline-block" : "";
+      $("thomann-check").disabled = false;
+    } catch (e) {
+      $("thomann-status").textContent = "Błąd: " + e.message;
+      $("thomann-check").disabled = false;
+    }
+  };
+
+  $("thomann-copy").onclick = () => {
+    const el = $("thomann-affiliate-output");
+    if (!el) return;
+    el.select();
+    document.execCommand("copy");
+    $("thomann-copy").textContent = "Skopiowano!";
+    setTimeout(() => { $("thomann-copy").textContent = "Kopiuj linki afiliacyjne"; }, 2000);
+  };
+
+  // Thomann budget load + save
+  async function loadThomannBudget() {
+    try {
+      const b = await api("/v1/budget");
+      $("thomann-income").value = b.monthly_income;
+      $("thomann-budget").value = b.monthly_cost_budget || "";
+    } catch (e) { $("thomann-budget-status").textContent = "Budżet: " + e.message; }
+  }
+  $("thomann-save-budget").onclick = async () => {
+    const body = {};
+    const income = $("thomann-income").value.trim().replace(",", ".");
+    const budget = $("thomann-budget").value.trim().replace(",", ".");
+    if (income) body.monthly_income = income;
+    if (budget !== undefined) body.monthly_cost_budget = budget;
+    $("thomann-budget-status").textContent = "Zapisuję…";
+    try {
+      const r = await api("/v1/budget", { method: "POST", body: JSON.stringify(body) });
+      $("thomann-budget-status").textContent = "✓ Zapisano. Dochód: " + r.monthly_income + " PLN, budżet: " + (r.monthly_cost_budget || "brak");
+    } catch (e) { $("thomann-budget-status").textContent = "Błąd: " + e.message; }
   };
 
   async function loadCosts(year, month) {
@@ -648,17 +652,6 @@
       const summary = await api(`/v1/costs/summary${qs ? "?" + qs : ""}`);
       const el = $("costs-summary");
       el.innerHTML = "";
-
-      // Auto-fill committed costs from the current month's email-OCR total.
-      // The user can override this in the advanced section of the planner.
-      // Only update auto-committed for the current month (no year/month override).
-      if (year === undefined && month === undefined) {
-        const monthlyTotal = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
-        autoCommittedCosts = monthlyTotal;
-        const committedOverride = parseFloat(money("committed_costs")) || 0;
-        const effectiveCommitted = committedOverride > 0 ? committedOverride : autoCommittedCosts;
-        $("committed-display").textContent = format(effectiveCommitted.toFixed(2));
-      }
 
       if (!summary.by_vendor.length) {
         el.innerHTML = "<p class='notice'>Brak kosztów email-OCR w tym miesiącu.</p>";
@@ -735,45 +728,6 @@
     tableEl.innerHTML = tableHtml;
   }
 
-  // --- Tax estimate auto-fill ---
-  // Fetches auto-calculated PIT/VAT/ZUS/health from the API and fills
-  // the reserve fields if the user hasn't manually overridden them.
-  let taxEstimateLoaded = false;
-  async function loadTaxEstimate() {
-    try {
-      const t = await api("/v1/tax/estimate");
-      $("pit-rate").textContent = t.pit_rate_percent;
-      $("vat-rate").textContent = t.vat_rate_percent;
-
-      // Only auto-fill if the user hasn't manually set values
-      if (!taxEstimateLoaded) {
-        const currentTax = parseFloat(money("tax_reserve")) || 0;
-        const currentVat = parseFloat(money("vat_reserve")) || 0;
-        const currentZus = parseFloat(money("zus_reserve")) || 0;
-        const currentHealth = parseFloat(money("health_reserve")) || 0;
-        const currentBuffer = parseFloat(money("minimum_cash_buffer")) || 0;
-
-        // Only auto-fill if all reserve fields are zero (first load)
-        if (currentTax === 0 && currentVat === 0 && currentZus === 0 && currentHealth === 0 && currentBuffer === 0) {
-          $("tax_reserve").value = parseFloat(t.pit_estimate).toFixed(2);
-          $("vat_reserve").value = parseFloat(t.vat_estimate).toFixed(2);
-          $("zus_reserve").value = parseFloat(t.zus_estimate).toFixed(2);
-          $("health_reserve").value = parseFloat(t.health_insurance).toFixed(2);
-          updateReservesTotal();
-        }
-        // Mark as loaded regardless of whether we filled — avoids
-        // re-checking on every subsequent call when user has values.
-        taxEstimateLoaded = true;
-      }
-
-      // Always update the display breakdown
-      const total = parseFloat(t.total_tax_burden);
-      $("reserves-total-display").textContent = format(total.toFixed(2));
-    } catch (e) {
-      // Tax endpoint may not be available — silently ignore
-    }
-  }
-
   $("ingest-email").onclick = async () => {
     $("ingest-result").textContent = "Uruchamiam w tle…";
     try {
@@ -795,7 +749,6 @@
           await loadCosts(costsYear, costsMonth);
           await loadMonth();
           await loadTrends();
-          await loadTaxEstimate();
           const docs = await api("/v1/ingest/documents?limit=500");
           const afterCount = docs.documents ? docs.documents.length : 0;
           const newDocs = afterCount - beforeCount;
@@ -814,16 +767,6 @@
   };
   $("load-costs").onclick = () => loadCosts(costsYear, costsMonth);
 
-  // Restore last planner result to overview on page load
-  try {
-    const lastResult = JSON.parse(localStorage.getItem("ledgerguard_last_result") || "null");
-    if (lastResult) {
-      $("overview-safe").textContent = format(lastResult.safe_to_spend);
-      $("overview-safe").className = `hero ${decisionClass(lastResult.decision)}`;
-      $("overview-safe-detail").textContent = `Headroom: ${format(lastResult.headroom)} — ${lastResult.decision}`;
-    }
-  } catch (_) {}
-
   // Auto-load data if a device token or bootstrap token is already stored —
   // avoids 401 console errors on first visit when no credentials are available.
   const hasToken = activeToken || localStorage.getItem("ledgerguard_token");
@@ -831,7 +774,7 @@
     loadMonth();
     loadCosts();
     loadTrends();
-    loadTaxEstimate();
+    loadThomannBudget();
     status();
   } else {
     $("month-detail").textContent = "Wpisz token API w zakładce Ustawienia, aby załadować dane.";

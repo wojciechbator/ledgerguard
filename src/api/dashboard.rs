@@ -47,12 +47,15 @@ mod tests {
     #[test]
     fn dashboard_is_embedded_and_has_no_external_assets() {
         assert!(DASHBOARD_HTML.contains("<title>LedgerGuard</title>"));
-        assert!(DASHBOARD_HTML.contains("/v1/planner/evaluate"));
-        assert!(DASHBOARD_HTML.contains("/v1/planner/simulate"));
+        assert!(DASHBOARD_HTML.contains("/v1/planner/affordability"));
         assert!(DASHBOARD_HTML.contains("/v1/ingest/email"));
         assert!(DASHBOARD_HTML.contains("/v1/costs/summary"));
-        assert!(!DASHBOARD_HTML.contains("https://"));
-        assert!(!DASHBOARD_HTML.contains("http://"));
+        assert!(DASHBOARD_HTML.contains("/v1/thomann/resolve"));
+        // No external script/style/link/img tags — only example URLs in a
+        // textarea placeholder are allowed (same rule as thomann_page test).
+        assert!(!DASHBOARD_HTML.contains("<script src="));
+        assert!(!DASHBOARD_HTML.contains("<link href="));
+        assert!(!DASHBOARD_HTML.contains("<img src="));
     }
 
     #[test]
