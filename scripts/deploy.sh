@@ -8,6 +8,7 @@ WAIT_SECONDS="${LEDGERGUARD_DEPLOY_WAIT_SECONDS:-3600}"
 POLL_SECONDS="${LEDGERGUARD_DEPLOY_POLL_SECONDS:-3}"
 REMOTE="${LEDGERGUARD_DEPLOY_HOST:-virya-home}"
 REMOTE_DIR="${LEDGERGUARD_DEPLOY_REMOTE_DIR:-/srv/ledgerguard}"
+BLUEGREEN="$ROOT_DIR/scripts/deploy-bluegreen.sh"
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -61,7 +62,26 @@ REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
 [[ "$REMOTE_MAIN" == "$TARGET" ]] || fail "origin/main moved while waiting: remote=$REMOTE_MAIN target=$TARGET"
 
 printf '==> Deploying exact validated SHA %s to %s\n' "$TARGET" "$REMOTE"
-ssh -T "$REMOTE" bash -s -- "$REMOTE_DIR" "$TARGET" <<'REMOTE_DEPLOY'
+
+# --- Try blue-green (zero-downtime) first; fall back to force-recreate ---
+# Blue-green is the canonical path. If no blue/green container is running
+# (first install or recovery), fall back to the force-recreate path.
+blue_green_eligible="$(ssh -T "$REMOTE" bash -s -- "$REMOTE_DIR" <<'REMOTE_CHECK'
+{
+set -euo pipefail
+root="$1"
+cd "$root" 2>/dev/null || exit 0
+blue="$(docker inspect ledgerguard-app-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+green="$(docker inspect ledgerguard-app-green-1 --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+if [[ "$blue" == "healthy" || "$blue" == "running" || "$green" == "healthy" || "$green" == "running" ]]; then
+  echo "eligible"
+fi
+} </dev/null
+REMOTE_CHECK
+)"
+
+# Update the remote checkout to the target SHA (needed for both paths)
+ssh -T "$REMOTE" bash -s -- "$REMOTE_DIR" "$TARGET" <<'REMOTE_UPDATE'
 set -Eeuo pipefail
 root="$1"
 target="$2"
@@ -77,7 +97,20 @@ fetched="$(git rev-parse FETCH_HEAD)"
 [[ "$fetched" == "$target" ]] || fail "origin/main moved before Home deploy: fetched=$fetched target=$target"
 git merge --ff-only "$target"
 [[ "$(git rev-parse HEAD)" == "$target" ]] || fail 'Home LedgerGuard did not converge to exact target'
-exec bash scripts/deploy-home.sh "$target"
-REMOTE_DEPLOY
+REMOTE_UPDATE
 
+if [[ "$blue_green_eligible" == "eligible" ]]; then
+  printf '\n==> Blue-green deploy (zero-downtime Caddy cutover)\n'
+  # Ship the blue-green script to the remote and execute it
+  scp -q "$BLUEGREEN" "$REMOTE:/tmp/lg-deploy-bluegreen.sh"
+  ssh -T "$REMOTE" "cd $REMOTE_DIR && bash /tmp/lg-deploy-bluegreen.sh $TARGET"
+  deploy_status=$?
+  ssh -T "$REMOTE" "rm -f /tmp/lg-deploy-bluegreen.sh" 2>/dev/null || true
+else
+  printf '\n==> Bootstrap/recovery deploy (force-recreate — no blue/green container running)\n'
+  ssh -T "$REMOTE" "cd $REMOTE_DIR && bash scripts/deploy-home.sh $TARGET"
+  deploy_status=$?
+fi
+
+(( deploy_status == 0 )) || exit "$deploy_status"
 printf 'MAKE_DEPLOY=PASS repo=ledgerguard sha=%s host=%s exact=true\n' "$TARGET" "$REMOTE"
