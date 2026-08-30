@@ -21,7 +21,10 @@ assert "virya-home" in WAITER_TEXT
 assert "/srv/ledgerguard" in WAITER_TEXT
 assert 'fetched="$(git rev-parse FETCH_HEAD)"' in WAITER_TEXT
 assert '[[ "$fetched" == "$target" ]]' in WAITER_TEXT
-assert 'exec bash scripts/deploy-home.sh "$target"' in WAITER_TEXT
+# Blue-green is the canonical path; deploy-home.sh is the bootstrap fallback
+assert 'deploy-bluegreen.sh' in WAITER_TEXT
+assert 'deploy-home.sh' in WAITER_TEXT
+assert 'blue_green_eligible' in WAITER_TEXT
 assert 'TARGET="${1:-}"' in HOME_TEXT
 assert 'git fetch --quiet origin main' in HOME_TEXT
 assert '[[ "${fetched}" == "${TARGET}" ]]' in HOME_TEXT
