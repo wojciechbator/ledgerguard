@@ -135,10 +135,16 @@ fi
 [[ "$env_fail" == 0 ]] || fail "pre-deploy env check failed — fix .env before deploying"
 printf 'ENV_CHECK=PASS\n'
 
-# Verify blue is running and healthy
+# Verify at least one app (blue or green) is running and healthy
 blue_health="$(docker inspect "$BLUE_APP" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
-[[ "$blue_health" == "healthy" || "$blue_health" == "running" ]] || fail "blue app not healthy: $blue_health"
-printf 'BLUE_BASELINE=PASS health=%s\n' "$blue_health"
+green_health="$(docker inspect "$GREEN_APP" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+if [[ "$blue_health" == "healthy" || "$blue_health" == "running" ]]; then
+  printf 'BLUE_BASELINE=PASS health=%s\n' "$blue_health"
+elif [[ "$green_health" == "healthy" || "$green_health" == "running" ]]; then
+  printf 'GREEN_BASELINE=PASS health=%s (blue not running)\n' "$green_health"
+else
+  fail "no healthy app found (blue=$blue_health green=$green_health)"
+fi
 
 # Verify proxy is running
 docker inspect "$PROXY_CONTAINER" --format '{{.State.Status}}' 2>/dev/null | grep -q running || fail "Caddy proxy is not running"
