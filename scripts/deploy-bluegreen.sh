@@ -11,9 +11,16 @@ set -Eeuo pipefail
 # release running with no user-visible downtime.
 #
 # Usage (runs ON virya-home via SSH):
-#   bash scripts/deploy-bluegreen.sh <target-sha>
+#   bash scripts/deploy-bluegreen.sh <target-sha> [root-dir]
+#
+# When shipped to /tmp by deploy.sh, BASH_SOURCE resolves to /tmp and the
+# parent-dir heuristic breaks. Accept an explicit root-dir as the 2nd arg.
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -n "${2:-}" ]]; then
+  ROOT_DIR="$2"
+else
+  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 TARGET="${1:-}"
 ENV_FILE="${ROOT_DIR}/.env"
 CADDYFILE="${ROOT_DIR}/Caddyfile"

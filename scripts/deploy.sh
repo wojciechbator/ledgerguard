@@ -103,7 +103,7 @@ if [[ "$blue_green_eligible" == "eligible" ]]; then
   printf '\n==> Blue-green deploy (zero-downtime Caddy cutover)\n'
   # Ship the blue-green script to the remote and execute it
   scp -q "$BLUEGREEN" "$REMOTE:/tmp/lg-deploy-bluegreen.sh"
-  ssh -T "$REMOTE" "cd $REMOTE_DIR && bash /tmp/lg-deploy-bluegreen.sh $TARGET"
+  ssh -T "$REMOTE" "cd $REMOTE_DIR && bash /tmp/lg-deploy-bluegreen.sh $TARGET $REMOTE_DIR"
   deploy_status=$?
   ssh -T "$REMOTE" "rm -f /tmp/lg-deploy-bluegreen.sh" 2>/dev/null || true
 else
