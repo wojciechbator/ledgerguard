@@ -313,6 +313,18 @@
   };
   async function api(path, options = {}) {
     const response = await fetch(path, {...options, headers: {...headers(), ...(options.headers || {})}});
+    // If the device token is stale (e.g. DB was reset, session revoked),
+    // clear it and retry once with the bootstrap token from the input
+    // field. A 401 means auth rejected the request before the handler ran,
+    // so retrying POSTs is safe — the body was never processed.
+    if (response.status === 401 && activeToken) {
+      activeToken = "";
+      localStorage.removeItem("ledgerguard_device_token");
+      const retry = await fetch(path, {...options, headers: {...headers(), ...(options.headers || {})}});
+      const retryBody = await retry.json().catch(() => ({}));
+      if (!retry.ok) throw new Error(retryBody.message || `${retry.status} ${retry.statusText}`);
+      return retryBody;
+    }
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.message || `${response.status} ${response.statusText}`);
     return body;
