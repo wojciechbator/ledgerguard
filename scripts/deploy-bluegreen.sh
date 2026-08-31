@@ -122,7 +122,7 @@ done
 # Direct health check via Docker network
 docker run --rm --network ledgerguard_internal curlimages/curl:8.12.0 \
   --fail --silent --show-error --connect-timeout 3 --max-time 10 \
-  "http://${GREEN_ALIAS}:8080/health" >/dev/null
+  "http://${GREEN_ALIAS}:8080/healthz" >/dev/null
 
 printf 'GREEN_HEALTH=PASS\n'
 
@@ -147,7 +147,7 @@ LEDGERGUARD_PORT="$(grep LEDGERGUARD_PORT "$ENV_FILE" 2>/dev/null | cut -d= -f2 
 
 # Verify the proxy is still serving
 curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
-  "http://127.0.0.1:${LEDGERGUARD_PORT}/health" >/dev/null
+  "http://127.0.0.1:${LEDGERGUARD_PORT}/healthz" >/dev/null
 printf 'PUBLIC_HEALTH=PASS port=%s\n' "$LEDGERGUARD_PORT"
 
 # Stop blue app
