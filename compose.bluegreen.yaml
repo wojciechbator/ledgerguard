@@ -12,12 +12,10 @@
 
 services:
   app-green:
-    build:
-      context: .
-      target: runtime
     image: ledgerguard:${LEDGERGUARD_GREEN_TAG:?Set LEDGERGUARD_GREEN_TAG}
-    restart: "no"
+    restart: unless-stopped
     init: true
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -31,6 +29,8 @@ services:
       LEDGERGUARD_MONTHLY_COST_BUDGET: ${LEDGERGUARD_MONTHLY_COST_BUDGET:-}
       LEDGERGUARD_MONTHLY_INCOME: ${LEDGERGUARD_MONTHLY_INCOME:-}
       LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS: ${LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS:-}
+      LEDGERGUARD_GIT_SHA: ${LEDGERGUARD_GIT_SHA:-unknown}
+      LEDGERGUARD_BUILD_TIMESTAMP: ${LEDGERGUARD_BUILD_TIMESTAMP:-unknown}
       RUST_LOG: ${RUST_LOG:-info}
       LEDGERGUARD_IMAP_HOST: ${LEDGERGUARD_IMAP_HOST:-imap.gmail.com}
       LEDGERGUARD_IMAP_PORT: ${LEDGERGUARD_IMAP_PORT:-993}
@@ -69,7 +69,6 @@ services:
       - no-new-privileges:true
     pids_limit: 128
     mem_limit: 512m
-    stop_grace_period: 10s
     healthcheck:
       test: ["CMD", "/ledgerguard", "healthcheck"]
       interval: 10s

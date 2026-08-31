@@ -72,6 +72,12 @@ struct HealthResponse {
     status: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+struct MetaResponse {
+    git_sha: String,
+    release: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct EvaluateRequest {
     pub input: PlannerInput,
@@ -205,6 +211,7 @@ pub fn router(state: AppState, auth: ApiAuth) -> Router {
         .route("/thomann", get(thomann_page))
         .route("/healthz", get(health))
         .route("/readyz", get(ready))
+        .route("/meta", get(meta))
         .nest("/v1", v1)
         .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
         .layer(PropagateRequestIdLayer::x_request_id())
@@ -306,6 +313,14 @@ async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, Ap
             )
         })?;
     Ok(Json(HealthResponse { status: "ready" }))
+}
+
+async fn meta() -> Json<MetaResponse> {
+    Json(MetaResponse {
+        git_sha: std::env::var("LEDGERGUARD_GIT_SHA").unwrap_or_else(|_| "unknown".to_owned()),
+        release: std::env::var("LEDGERGUARD_BUILD_TIMESTAMP")
+            .unwrap_or_else(|_| "unknown".to_owned()),
+    })
 }
 
 async fn accounting_provider(State(state): State<AppState>) -> Json<ProviderDescriptor> {

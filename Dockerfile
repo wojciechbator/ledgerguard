@@ -5,6 +5,7 @@ RUN apk add --no-cache ca-certificates musl-dev
 WORKDIR /app
 
 ARG CARGO_PROFILE=release
+ARG LEDGERGUARD_GIT_SHA
 
 # Keep dependency compilation in a normal BuildKit layer so external cache
 # exporters (including GitHub Actions) can reuse it across ephemeral runners.
@@ -30,8 +31,10 @@ RUN --mount=type=cache,id=ledgerguard-cargo-registry,target=/usr/local/cargo/reg
     && cp "/app/target-final/release/ledgerguard" /ledgerguard
 
 FROM alpine:3.21 AS runtime
+ARG LEDGERGUARD_GIT_SHA
 RUN apk add --no-cache ca-certificates poppler-utils tesseract-ocr tesseract-ocr-data-pol tesseract-ocr-data-eng && \
     adduser -D -u 10001 ledgerguard
+LABEL org.opencontainers.image.revision=${LEDGERGUARD_GIT_SHA}
 WORKDIR /app
 COPY --from=builder /ledgerguard /ledgerguard
 COPY migrations /app/migrations

@@ -178,6 +178,12 @@ fn run_utility_command() -> Result<bool> {
             runtime.block_on(run_email_ingest())?;
             Ok(true)
         }
+        "migrate" => {
+            init_tracing();
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(run_migrate())?;
+            Ok(true)
+        }
         _ => bail!("unknown command: {command}"),
     }
 }
@@ -259,6 +265,29 @@ async fn run_email_ingest() -> Result<()> {
         report.errors
     );
 
+    Ok(())
+}
+
+async fn run_migrate() -> Result<()> {
+    let config = Config::from_env()?;
+    let pool = PgPoolOptions::new()
+        .min_connections(1)
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(config.database_url.expose())
+        .await
+        .context("failed to connect to PostgreSQL")?;
+
+    let migrations_dir =
+        env::var("LEDGERGUARD_MIGRATIONS_DIR").unwrap_or_else(|_| "migrations".to_owned());
+    let migrator = Migrator::new(Path::new(&migrations_dir))
+        .await
+        .with_context(|| format!("failed to load database migrations from {migrations_dir}"))?;
+    migrator
+        .run(&pool)
+        .await
+        .context("failed to apply database migrations")?;
+    info!("migrations applied successfully");
     Ok(())
 }
 
