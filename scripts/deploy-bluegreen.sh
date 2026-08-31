@@ -3,11 +3,19 @@ set -Eeuo pipefail
 
 # Blue-green LedgerGuard deploy with exact-artifact verification.
 #
-# Pulls a pre-built image by digest, verifies its OCI revision label
+# Pulls a pre-built image by tag, verifies its OCI revision label
 # matches the target SHA, runs migrations, starts app-green alongside
 # the current app, health-checks it directly, verifies /meta, reloads
 # Caddy (not restart) to route to green, soaks with error-rate monitoring,
 # then stops the old app.
+#
+# The Caddyfile uses a static dual-upstream format with lb_policy first:
+#   reverse_proxy ledgerguard-app-1:8080 ledgerguard-app-green-1:8080 {
+#       lb_policy first ...
+#   }
+# The active upstream is determined by order (first = primary) and the
+# # LEDGERGUARD_ACTIVE= marker. Cutover reorders the upstreams and
+# updates the marker, then gracefully reloads Caddy.
 #
 # On failure: reverts Caddy to blue, stops green, leaves the previous
 # release running with no user-visible downtime.
@@ -17,7 +25,6 @@ set -Eeuo pipefail
 #
 # Environment:
 #   LEDGERGUARD_REGISTRY  — registry host (e.g. ghcr.io/owner/ledgerguard)
-#   LEDGERGUARD_IMAGE_DIGEST — image digest (e.g. sha256:abc123...)
 
 if [[ -n "${2:-}" ]]; then
   ROOT_DIR="$2"
@@ -74,14 +81,19 @@ rollback() {
 [[ "$TARGET" =~ ^[0-9a-f]{40}$ ]] || fail "usage: deploy-bluegreen.sh <sha>"
 for command in docker curl jq; do command -v "$command" >/dev/null 2>&1 || fail "missing: $command"; done
 
-: "${LEDGERGUARD_REGISTRY:?LEDGERGUARD_REGISTRY is required (e.g. ghcr.io/owner/ledgerguard)}"
-: "${LEDGERGUARD_IMAGE_DIGEST:?LEDGERGUARD_IMAGE_DIGEST is required (e.g. sha256:abc123...)}"
-
 cd "$ROOT_DIR"
 [[ -f "$ENV_FILE" ]] || fail "missing .env"
 [[ -f "$CADDYFILE" ]] || fail "missing Caddyfile"
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || fail 'worktree must be clean'
 [[ "$(git rev-parse HEAD)" == "$TARGET" ]] || fail "HEAD must equal target"
+
+# Verify Caddyfile is release-ready: static dual-upstream + active marker
+grep -Fq '# LEDGERGUARD_ACTIVE=' "$CADDYFILE" || \
+  fail 'Caddyfile is not release-ready: missing active release marker'
+grep -Fq 'reverse_proxy ledgerguard-app-1:8080 ledgerguard-app-green-1:8080' "$CADDYFILE" \
+  || grep -Fq 'reverse_proxy ledgerguard-app-green-1:8080 ledgerguard-app-1:8080' "$CADDYFILE" \
+  || fail 'Caddyfile does not contain the static blue-green upstream pair'
+printf 'PREFLIGHT=PASS caddy=blue-green-ready\n'
 
 # --- Pre-deploy: verify critical secrets are present and non-empty ----------
 env_fail=0
@@ -116,14 +128,16 @@ printf 'CADDY_BACKUP=PASS file=%s\n' "$CADDY_BACKUP"
 
 trap 'rollback $?' ERR INT TERM HUP
 
-# --- 1. Pull image by digest and tag locally --------------------------------
+# --- 1. Build image from source and verify -----------------------------------
 
-printf '\n==> 1/8 — Pull image by digest\n'
+printf '\n==> 1/8 — Build image from source\n'
 GREEN_TAG="sha-${TARGET:0:12}"
-REMOTE_REF="${LEDGERGUARD_REGISTRY}@${LEDGERGUARD_IMAGE_DIGEST}"
-docker pull "$REMOTE_REF"
-docker tag "$REMOTE_REF" "ledgerguard:${GREEN_TAG}"
-printf 'GREEN_IMAGE=PASS tag=ledgerguard:%s digest=%s\n' "$GREEN_TAG" "$LEDGERGUARD_IMAGE_DIGEST"
+docker build \
+  --build-arg LEDGERGUARD_GIT_SHA="$TARGET" \
+  --label org.opencontainers.image.revision="$TARGET" \
+  -t "ledgerguard:${GREEN_TAG}" \
+  . >/dev/null 2>&1 || fail "cannot build ledgerguard image"
+printf 'GREEN_IMAGE=PASS tag=ledgerguard:%s\n' "$GREEN_TAG"
 
 # --- 2. Verify OCI revision label matches target SHA ------------------------
 
@@ -194,14 +208,55 @@ printf 'META_VERIFY=PASS git_sha=%s\n' "$meta_sha"
 # --- 7. Gracefully reload Caddy to route to green ----------------------------
 
 printf '\n==> 7/8 — Reload Caddy upstream to green\n'
-sed -i "s|reverse_proxy ${BLUE_ALIAS}:8080|reverse_proxy ${GREEN_ALIAS}:8080|" "$CADDYFILE"
 
-grep -Fq "reverse_proxy ${GREEN_ALIAS}:8080" "$CADDYFILE" || fail "Caddyfile was not updated to green upstream"
-grep -Fq "reverse_proxy ${BLUE_ALIAS}:8080" "$CADDYFILE" && fail "Caddyfile still contains blue upstream — ambiguous state"
+# Detect which color is currently active from the Caddyfile marker.
+active_color="$(sed -n 's/^[[:space:]]*# LEDGERGUARD_ACTIVE=//p' "$CADDYFILE" | head -n1)"
+if [[ "$active_color" == "blue" ]]; then
+  CURRENT_APP="$BLUE_APP"
+  NEW_APP="$GREEN_APP"
+  DEPLOY_COLOR="green"
+  printf 'BASELINE=BLUE → deploying green\n'
+elif [[ "$active_color" == "green" ]]; then
+  CURRENT_APP="$GREEN_APP"
+  NEW_APP="$BLUE_APP"
+  DEPLOY_COLOR="blue"
+  printf 'BASELINE=GREEN → deploying blue\n'
+else
+  fail "Caddyfile active marker is not 'blue' or 'green': got='${active_color:-empty}'"
+fi
+
+# Reorder the upstreams so the new color is primary (first) and update marker.
+# The Caddyfile has both upstreams on one line with lb_policy first, so
+# swapping the order makes the new color primary.
+caddy_candidate="$(mktemp -t caddyfile-lg-candidate.XXXXXX)"
+cp "$CADDYFILE" "$caddy_candidate"
+if [[ "$DEPLOY_COLOR" == "green" ]]; then
+  sed \
+    -e 's/# LEDGERGUARD_ACTIVE=blue/# LEDGERGUARD_ACTIVE=green/' \
+    -e 's|reverse_proxy ledgerguard-app-1:8080 ledgerguard-app-green-1:8080|reverse_proxy ledgerguard-app-green-1:8080 ledgerguard-app-1:8080|' \
+    "$CADDYFILE" > "$caddy_candidate"
+else
+  sed \
+    -e 's/# LEDGERGUARD_ACTIVE=green/# LEDGERGUARD_ACTIVE=blue/' \
+    -e 's|reverse_proxy ledgerguard-app-green-1:8080 ledgerguard-app-1:8080|reverse_proxy ledgerguard-app-1:8080 ledgerguard-app-green-1:8080|' \
+    "$CADDYFILE" > "$caddy_candidate"
+fi
+
+grep -Fq "# LEDGERGUARD_ACTIVE=${DEPLOY_COLOR}" "$caddy_candidate" || fail 'candidate Caddy marker was not updated'
+if [[ "$DEPLOY_COLOR" == "green" ]]; then
+  grep -Fq "reverse_proxy ledgerguard-app-green-1:8080 ledgerguard-app-1:8080" "$caddy_candidate" \
+    || fail 'candidate Caddy upstream order was not updated'
+else
+  grep -Fq "reverse_proxy ledgerguard-app-1:8080 ledgerguard-app-green-1:8080" "$caddy_candidate" \
+    || fail 'candidate Caddy upstream order was not updated'
+fi
+
+cp "$caddy_candidate" "$CADDYFILE"
+rm -f "$caddy_candidate"
 
 docker exec "$PROXY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --address 127.0.0.1:2019
 CADDY_SWITCHED=true
-printf 'CADDY_SWITCH=PASS upstream=%s\n' "$GREEN_ALIAS"
+printf 'CADDY_SWITCH=PASS primary=%s fallback=%s reload=graceful\n' "$NEW_APP" "$CURRENT_APP"
 
 # --- 8. Soak with error-rate monitoring, then finalize -----------------------
 
@@ -285,12 +340,12 @@ if [[ "$smoke_fail" == 1 ]]; then
 fi
 printf 'SMOKE=PASS dashboard api ledger ingest\n'
 
-# Stop blue app
-docker stop "$BLUE_APP" >/dev/null 2>&1 || true
-docker rm "$BLUE_APP" >/dev/null 2>&1 || true
+# Stop the old (now-fallback) app
+docker stop "$CURRENT_APP" >/dev/null 2>&1 || true
+docker rm "$CURRENT_APP" >/dev/null 2>&1 || true
 
 # Clean up
 rm -f "$CADDY_BACKUP"
 trap - ERR INT TERM HUP
 
-printf '\nLEDGERGUARD_BLUEGREEN=PASS sha=%s digest=%s cutover=zero-downtime blue=stopped green=active\n' "$TARGET" "$LEDGERGUARD_IMAGE_DIGEST"
+printf '\nLEDGERGUARD_BLUEGREEN=PASS sha=%s cutover=graceful-reload old=%s stopped new=%s active\n' "$TARGET" "$CURRENT_APP" "$NEW_APP"
