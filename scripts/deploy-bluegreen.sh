@@ -39,9 +39,12 @@ BLUE_APP="ledgerguard-app-1"
 GREEN_ALIAS="ledgerguard-app-green"
 BLUE_ALIAS="ledgerguard-app"
 PROXY_CONTAINER="ledgerguard-proxy-1"
+RELEASE_STATE_DIR="/var/lib/ledgerguard/releases"
+RECEIPT_HELPER="${ROOT_DIR}/scripts/release_receipt.py"
 CADDY_BACKUP=""
 GREEN_STARTED=false
 CADDY_SWITCHED=false
+RELEASE_ID=""
 SOAK_SECONDS="${LEDGERGUARD_SOAK_SECONDS:-300}"
 SOAK_ERROR_THRESHOLD_PERCENT="${LEDGERGUARD_SOAK_ERROR_THRESHOLD_PERCENT:-2}"
 SOAK_MAX_ABSOLUTE_FAILURES="${LEDGERGUARD_SOAK_MAX_ABSOLUTE_FAILURES:-3}"
@@ -74,6 +77,15 @@ rollback() {
     printf 'ROLLBACK=GREEN_STOPPED\n' >&2
   fi
 
+  # Write failure receipt
+  if [[ -n "$RELEASE_ID" ]]; then
+    python3 "$RECEIPT_HELPER" rollback \
+      --state-dir "$RELEASE_STATE_DIR" \
+      --release-id "$RELEASE_ID" \
+      --service ledgerguard \
+      --reason "deploy-failure" >/dev/null 2>&1 || true
+  fi
+
   printf 'ROLLBACK=COMPLETE status=%d\n' "$status" >&2
   exit "$status"
 }
@@ -94,6 +106,16 @@ grep -Fq 'reverse_proxy ledgerguard-app-1:8080 ledgerguard-app-green-1:8080' "$C
   || grep -Fq 'reverse_proxy ledgerguard-app-green-1:8080 ledgerguard-app-1:8080' "$CADDYFILE" \
   || fail 'Caddyfile does not contain the static blue-green upstream pair'
 printf 'PREFLIGHT=PASS caddy=blue-green-ready\n'
+
+# Initialise release state and write pending receipt
+python3 "$RECEIPT_HELPER" init --state-dir "$RELEASE_STATE_DIR" --service ledgerguard >/dev/null
+RELEASE_ID="lg-${TARGET:0:12}-$(date -u +%Y%m%d%H%M%S)"
+python3 "$RECEIPT_HELPER" pending \
+  --state-dir "$RELEASE_STATE_DIR" \
+  --service ledgerguard \
+  --release-id "$RELEASE_ID" \
+  --source-sha "$TARGET" >/dev/null
+printf 'RELEASE=%s\n' "$RELEASE_ID"
 
 # --- Pre-deploy: verify critical secrets are present and non-empty ----------
 env_fail=0
@@ -139,6 +161,9 @@ docker build \
   . >/dev/null 2>&1 || fail "cannot build ledgerguard image"
 printf 'GREEN_IMAGE=PASS tag=ledgerguard:%s\n' "$GREEN_TAG"
 
+python3 "$RECEIPT_HELPER" phase --state-dir "$RELEASE_STATE_DIR" \
+  --release-id "$RELEASE_ID" --phase build --status pass >/dev/null
+
 # --- 2. Verify OCI revision label matches target SHA ------------------------
 
 printf '\n==> 2/8 — Verify OCI revision label\n'
@@ -160,6 +185,9 @@ docker run --rm \
   -e RUST_LOG="${RUST_LOG:-info}" \
   "ledgerguard:${GREEN_TAG}" migrate
 printf 'MIGRATE=PASS\n'
+
+python3 "$RECEIPT_HELPER" phase --state-dir "$RELEASE_STATE_DIR" \
+  --release-id "$RELEASE_ID" --phase migration --status pass >/dev/null
 
 # --- 4. Start green app ------------------------------------------------------
 
@@ -204,6 +232,9 @@ if [[ "$meta_sha" != "$TARGET" ]]; then
   fail "/meta gitSha mismatch: meta=$meta_sha target=$TARGET"
 fi
 printf 'META_VERIFY=PASS git_sha=%s\n' "$meta_sha"
+
+python3 "$RECEIPT_HELPER" phase --state-dir "$RELEASE_STATE_DIR" \
+  --release-id "$RELEASE_ID" --phase health --status pass >/dev/null
 
 # --- 7. Gracefully reload Caddy to route to green ----------------------------
 
@@ -347,5 +378,11 @@ docker rm "$CURRENT_APP" >/dev/null 2>&1 || true
 # Clean up
 rm -f "$CADDY_BACKUP"
 trap - ERR INT TERM HUP
+
+python3 "$RECEIPT_HELPER" complete \
+  --state-dir "$RELEASE_STATE_DIR" \
+  --release-id "$RELEASE_ID" \
+  --service ledgerguard \
+  --source-sha "$TARGET" >/dev/null
 
 printf '\nLEDGERGUARD_BLUEGREEN=PASS sha=%s cutover=graceful-reload old=%s stopped new=%s active\n' "$TARGET" "$CURRENT_APP" "$NEW_APP"
