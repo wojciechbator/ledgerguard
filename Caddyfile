@@ -1,3 +1,10 @@
 :8080 {
-	reverse_proxy ledgerguard-app:8080
+	# LEDGERGUARD_ACTIVE=blue
+	reverse_proxy ledgerguard-app-1:8080 ledgerguard-app-green-1:8080 {
+		lb_policy first
+		health_uri /healthz
+		health_interval 2s
+		health_timeout 2s
+		lb_try_duration 3s
+	}
 }

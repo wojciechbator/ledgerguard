@@ -28,14 +28,14 @@ services:
         max-file: "3"
 
   app:
-    build:
-      context: .
-      target: runtime
+    image: ledgerguard:${LEDGERGUARD_TAG:-latest}
     restart: unless-stopped
     init: true
     depends_on:
       postgres:
         condition: service_healthy
+      setup:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://ledgerguard:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/ledgerguard
       LEDGERGUARD_BIND_ADDR: 0.0.0.0:8080
@@ -46,6 +46,8 @@ services:
       LEDGERGUARD_MONTHLY_COST_BUDGET: ${LEDGERGUARD_MONTHLY_COST_BUDGET:-}
       LEDGERGUARD_MONTHLY_INCOME: ${LEDGERGUARD_MONTHLY_INCOME:-}
       LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS: ${LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS:-}
+      LEDGERGUARD_GIT_SHA: ${LEDGERGUARD_GIT_SHA:-unknown}
+      LEDGERGUARD_BUILD_TIMESTAMP: ${LEDGERGUARD_BUILD_TIMESTAMP:-unknown}
       RUST_LOG: ${RUST_LOG:-info}
       LEDGERGUARD_IMAP_HOST: ${LEDGERGUARD_IMAP_HOST:-imap.gmail.com}
       LEDGERGUARD_IMAP_PORT: ${LEDGERGUARD_IMAP_PORT:-993}
@@ -91,6 +93,24 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  setup:
+    image: ledgerguard:${LEDGERGUARD_TAG:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://ledgerguard:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/ledgerguard
+      RUST_LOG: ${RUST_LOG:-info}
+    command: ["migrate"]
+    networks:
+      - database
+    restart: "no"
     logging:
       driver: json-file
       options:
