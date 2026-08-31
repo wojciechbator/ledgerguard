@@ -74,6 +74,30 @@ cd "$ROOT_DIR"
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || fail 'worktree must be clean'
 [[ "$(git rev-parse HEAD)" == "$TARGET" ]] || fail "HEAD must equal target"
 
+# --- Pre-deploy: verify critical secrets are present and non-empty ----------
+# These are the secrets that break production when missing. The .env file is
+# gitignored so deploys never touch it, but a manual server rebuild can
+# silently drop them. Fail fast before touching anything.
+env_fail=0
+for var in POSTGRES_PASSWORD LEDGERGUARD_API_TOKEN; do
+  val="$(grep -E "^${var}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+  if [[ -z "$val" || "$val" == replace-with-* ]]; then
+    printf 'ENV_CHECK=FAIL var=%s is missing or placeholder\n' "$var" >&2
+    env_fail=1
+  fi
+done
+# IMAP credentials are required for the email-OCR ingest button to work.
+# They are optional for pure accounting-sync deployments, but this server
+# uses email ingest, so we enforce them.
+imap_user="$(grep -E "^LEDGERGUARD_IMAP_USERNAME=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+imap_pass="$(grep -E "^LEDGERGUARD_IMAP_PASSWORD=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+if [[ -z "$imap_user" || -z "$imap_pass" ]]; then
+  printf 'ENV_CHECK=FAIL LEDGERGUARD_IMAP_USERNAME/IMAP_PASSWORD missing — email ingest will break\n' >&2
+  env_fail=1
+fi
+[[ "$env_fail" == 0 ]] || fail "pre-deploy env check failed — fix .env before deploying"
+printf 'ENV_CHECK=PASS\n'
+
 # Verify blue is running and healthy
 blue_health="$(docker inspect "$BLUE_APP" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
 [[ "$blue_health" == "healthy" || "$blue_health" == "running" ]] || fail "blue app not healthy: $blue_health"
@@ -149,6 +173,57 @@ LEDGERGUARD_PORT="$(grep LEDGERGUARD_PORT "$ENV_FILE" 2>/dev/null | cut -d= -f2 
 curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
   "http://127.0.0.1:${LEDGERGUARD_PORT}/healthz" >/dev/null
 printf 'PUBLIC_HEALTH=PASS port=%s\n' "$LEDGERGUARD_PORT"
+
+# --- Post-deploy smoke test: verify the actual dashboard endpoints work ---
+# /healthz only proves the process is alive. These checks prove the secrets
+# are wired correctly and the features the user relies on actually respond.
+API_TOKEN="$(grep -E "^LEDGERGUARD_API_TOKEN=" "$ENV_FILE" | head -1 | cut -d= -f2-)"
+smoke_fail=0
+
+# Dashboard HTML (public, no auth)
+dash_status="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 10 \
+  "http://127.0.0.1:${LEDGERGUARD_PORT}/")"
+if [[ "$dash_status" != "200" ]]; then
+  printf 'SMOKE=FAIL dashboard status=%s\n' "$dash_status" >&2
+  smoke_fail=1
+fi
+
+# Authenticated API: system status (proves API token is wired)
+api_status="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 10 \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  "http://127.0.0.1:${LEDGERGUARD_PORT}/v1/system/status")"
+if [[ "$api_status" != "200" ]]; then
+  printf 'SMOKE=FAIL /v1/system/status status=%s (expected 200 — API token broken?)\n' "$api_status" >&2
+  smoke_fail=1
+fi
+
+# Authenticated API: ledger month (proves DB connection works)
+ledger_status="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 10 \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  "http://127.0.0.1:${LEDGERGUARD_PORT}/v1/ledger/month")"
+if [[ "$ledger_status" != "200" ]]; then
+  printf 'SMOKE=FAIL /v1/ledger/month status=%s (expected 200 — DB broken?)\n' "$ledger_status" >&2
+  smoke_fail=1
+fi
+
+# Email ingest config check: the pre-deploy env check already verified
+# IMAP creds are in .env. Here we verify the green container actually
+# loaded them by checking /v1/ingest/documents (GET, read-only — does
+# NOT trigger an IMAP fetch). A 200 means the ingest subsystem is
+# initialized. We don't POST to /v1/ingest/email because that kicks off
+# a real background IMAP fetch on every deploy.
+ingest_status="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 10 \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  "http://127.0.0.1:${LEDGERGUARD_PORT}/v1/ingest/documents?limit=1")"
+if [[ "$ingest_status" != "200" ]]; then
+  printf 'SMOKE=FAIL /v1/ingest/documents status=%s (expected 200)\n' "$ingest_status" >&2
+  smoke_fail=1
+fi
+
+if [[ "$smoke_fail" == 1 ]]; then
+  fail "post-deploy smoke test failed — green is live but features are broken, check .env"
+fi
+printf 'SMOKE=PASS dashboard api ledger ingest\n'
 
 # Stop blue app
 docker stop "$BLUE_APP" >/dev/null 2>&1 || true
