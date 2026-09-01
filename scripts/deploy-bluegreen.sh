@@ -385,7 +385,7 @@ docker rm "$CURRENT_APP" >/dev/null 2>&1 || true
 rm -f "$CADDY_BACKUP"
 trap - ERR INT TERM HUP
 
-python3 "$RECEIPT_HELPER" complete \
+python3 "$RECEIPT_HELPER" finalize \
   --state-dir "$RELEASE_STATE_DIR" \
   --release-id "$RELEASE_ID" \
   --service ledgerguard \
