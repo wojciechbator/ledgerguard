@@ -545,14 +545,19 @@ struct AffordabilityResponse {
     income: String,
     costs: String,
     net: String,
-    budget_configured: bool,
     planned: String,
-    headroom: Option<String>,
-    decision: Option<Decision>,
+    headroom: String,
+    decision: Decision,
     message: String,
     /// Configured expected monthly income (gross PLN). Always present —
     /// defaults to 26 500 PLN if not explicitly set.
     expected_monthly_income: String,
+    /// 70% of income — costs above this are Tight.
+    healthy_ceiling: String,
+    /// 80% of income — stretch reference line.
+    stretch_ceiling: String,
+    /// 85% of income — costs above this are Blocked.
+    max_ceiling: String,
 }
 
 async fn affordability(
@@ -584,30 +589,19 @@ async fn affordability(
 
     let budget = state.budget.read().unwrap_or_else(|e| e.into_inner());
     let policy = BudgetPolicy {
-        monthly_cost_budget: budget.monthly_cost_budget,
-        tight_share_basis_points: budget.tight_share_basis_points,
+        monthly_income: budget.monthly_income,
     };
     let expected_monthly_income = budget.monthly_income.amount().to_string();
+    let healthy_ceiling = policy.healthy_ceiling().amount().to_string();
+    let stretch_ceiling = policy.stretch_ceiling().amount().to_string();
+    let max_ceiling = policy.max_ceiling().amount().to_string();
     drop(budget);
-    let (headroom, decision, message, budget_configured) = match policy.afford(&summary, planned) {
-        Some(verdict) => (
-            Some(verdict.headroom.to_string()),
-            Some(verdict.decision),
-            match verdict.decision {
-                Decision::Healthy => "Zaplanowany koszt miesci sie w budzecie miesiaca.".to_owned(),
-                Decision::Tight => {
-                    "Zostaje mniej niz prog ciasno — rozwaz przesuniecie.".to_owned()
-                }
-                Decision::Blocked => "To przekroczyloby budzet kosztow na ten miesiac.".to_owned(),
-            },
-            true,
-        ),
-        None => (
-            None,
-            None,
-            "Ustaw LEDGERGUARD_MONTHLY_COST_BUDGET, aby dostawac werdykt.".to_owned(),
-            false,
-        ),
+
+    let verdict = policy.afford(&summary, planned);
+    let message = match verdict.decision {
+        Decision::Healthy => "Zaplanowany koszt miesci sie w budzecie miesiaca.".to_owned(),
+        Decision::Tight => "Koszty przekraczaja 70% dochodu — rozwaz przesuniecie.".to_owned(),
+        Decision::Blocked => "To przekroczyloby 85% dochodu — zakaz.".to_owned(),
     };
 
     Ok(Json(AffordabilityResponse {
@@ -616,12 +610,14 @@ async fn affordability(
         income: summary.income.amount().to_string(),
         costs: summary.costs.amount().to_string(),
         net: summary.net.to_string(),
-        budget_configured,
         planned: planned.amount().to_string(),
-        headroom,
-        decision,
+        headroom: verdict.headroom.to_string(),
+        decision: verdict.decision,
         message,
         expected_monthly_income,
+        healthy_ceiling,
+        stretch_ceiling,
+        max_ceiling,
     }))
 }
 
@@ -1210,25 +1206,31 @@ async fn revoke_device_token(
 
 #[derive(Debug, Serialize)]
 struct BudgetResponse {
-    monthly_cost_budget: Option<String>,
     monthly_income: String,
-    tight_share_basis_points: u16,
+    /// 70% of income — costs above this are Tight.
+    healthy_ceiling: String,
+    /// 80% of income — stretch reference line.
+    stretch_ceiling: String,
+    /// 85% of income — costs above this are Blocked.
+    max_ceiling: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct UpdateBudgetRequest {
     /// Optional new monthly income (gross PLN, decimal string).
     monthly_income: Option<String>,
-    /// Optional new monthly cost budget (gross PLN, decimal string).
-    monthly_cost_budget: Option<String>,
 }
 
 async fn get_budget(State(state): State<AppState>) -> Json<BudgetResponse> {
     let budget = state.budget.read().unwrap_or_else(|e| e.into_inner());
+    let policy = BudgetPolicy {
+        monthly_income: budget.monthly_income,
+    };
     Json(BudgetResponse {
-        monthly_cost_budget: budget.monthly_cost_budget.map(|m| m.amount().to_string()),
         monthly_income: budget.monthly_income.amount().to_string(),
-        tight_share_basis_points: budget.tight_share_basis_points,
+        healthy_ceiling: policy.healthy_ceiling().amount().to_string(),
+        stretch_ceiling: policy.stretch_ceiling().amount().to_string(),
+        max_ceiling: policy.max_ceiling().amount().to_string(),
     })
 }
 
@@ -1264,24 +1266,6 @@ async fn update_budget(
             })?;
         }
 
-        if let Some(budget_str) = request.monthly_cost_budget.as_deref().map(str::trim) {
-            if budget_str.is_empty() {
-                updated.monthly_cost_budget = None;
-            } else {
-                let budget_decimal = Decimal::from_str(budget_str).map_err(|_| {
-                    ApiError::new(
-                        StatusCode::BAD_REQUEST,
-                        "invalid_budget",
-                        "monthly_cost_budget must be a decimal like 15000 or 15000.00",
-                    )
-                })?;
-                updated.monthly_cost_budget =
-                    Some(Money::non_negative(budget_decimal).map_err(|e| {
-                        ApiError::new(StatusCode::BAD_REQUEST, "invalid_budget", e.to_string())
-                    })?);
-            }
-        }
-
         updated
     };
 
@@ -1303,10 +1287,14 @@ async fn update_budget(
         *budget = snapshot.clone();
     }
 
+    let policy = BudgetPolicy {
+        monthly_income: snapshot.monthly_income,
+    };
     Ok(Json(BudgetResponse {
-        monthly_cost_budget: snapshot.monthly_cost_budget.map(|m| m.amount().to_string()),
         monthly_income: snapshot.monthly_income.amount().to_string(),
-        tight_share_basis_points: snapshot.tight_share_basis_points,
+        healthy_ceiling: policy.healthy_ceiling().amount().to_string(),
+        stretch_ceiling: policy.stretch_ceiling().amount().to_string(),
+        max_ceiling: policy.max_ceiling().amount().to_string(),
     }))
 }
 

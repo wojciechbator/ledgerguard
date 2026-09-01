@@ -46,14 +46,18 @@ fn add(left: Money, right: Money) -> Money {
         .unwrap_or_else(|_| Money::max_value())
 }
 
+/// Cost ceiling as a share of monthly income. Hardcoded business rules:
+/// costs under 70% of income are Healthy, 70-85% are Tight, over 85% are
+/// Blocked. The 80% stretch line is shown in the UI as a reference.
+const HEALTHY_CEILING_BP: u16 = 7_000; // 70%
+const STRETCH_CEILING_BP: u16 = 8_000; // 80% — display reference
+const MAX_CEILING_BP: u16 = 8_500; // 85%
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BudgetPolicy {
-    /// Planned cost ceiling for a calendar month. `None` means the operator
-    /// has not declared one yet and affordability cannot be judged honestly.
-    pub monthly_cost_budget: Option<Money>,
-    /// When remaining headroom falls to this share of the budget (basis
-    /// points), the verdict becomes Tight instead of Healthy.
-    pub tight_share_basis_points: u16,
+    /// Expected monthly income (gross PLN). The cost budget is derived from
+    /// this: 70% = Healthy ceiling, 85% = Blocked ceiling.
+    pub monthly_income: Money,
 }
 
 /// The answer to "can I take another cost this month?".
@@ -72,34 +76,54 @@ pub struct AffordabilityVerdict {
 
 use super::planner::Decision;
 
+fn bp_to_decimal(bp: u16) -> Decimal {
+    Decimal::from(bp) / Decimal::from(10_000)
+}
+
 impl BudgetPolicy {
-    /// Remaining budget after this month's recorded costs and the planned
-    /// spend. `None` when no budget is configured — the caller must then say
-    /// so instead of inventing a verdict.
+    /// 70% of income — costs above this are Tight.
     #[must_use]
-    pub fn afford(&self, summary: &MonthSummary, planned: Money) -> Option<AffordabilityVerdict> {
-        let budget = self.monthly_cost_budget?;
-        let tight_line = budget
-            .amount()
-            .checked_mul(Decimal::from(self.tight_share_basis_points))
-            .and_then(|value| value.checked_div(Decimal::from(10_000)))
-            .unwrap_or_default();
+    pub fn healthy_ceiling(&self) -> Money {
+        Money::non_negative(self.monthly_income.amount() * bp_to_decimal(HEALTHY_CEILING_BP))
+            .unwrap_or_else(|_| Money::zero())
+    }
 
-        let headroom = budget.amount() - summary.costs.amount() - planned.amount();
+    /// 80% of income — the stretch reference line shown in the UI.
+    #[must_use]
+    pub fn stretch_ceiling(&self) -> Money {
+        Money::non_negative(self.monthly_income.amount() * bp_to_decimal(STRETCH_CEILING_BP))
+            .unwrap_or_else(|_| Money::zero())
+    }
 
-        let decision = if headroom <= Decimal::ZERO {
+    /// 85% of income — costs above this are Blocked.
+    #[must_use]
+    pub fn max_ceiling(&self) -> Money {
+        Money::non_negative(self.monthly_income.amount() * bp_to_decimal(MAX_CEILING_BP))
+            .unwrap_or_else(|_| Money::zero())
+    }
+
+    /// Always returns a verdict — the budget is derived from income, so
+    /// there is no "not configured" state.
+    #[must_use]
+    pub fn afford(&self, summary: &MonthSummary, planned: Money) -> AffordabilityVerdict {
+        let max_ceiling = self.max_ceiling().amount();
+        let healthy_ceiling = self.healthy_ceiling().amount();
+        let total = summary.costs.amount() + planned.amount();
+        let headroom = max_ceiling - total;
+
+        let decision = if total >= max_ceiling {
             Decision::Blocked
-        } else if headroom <= tight_line {
+        } else if total > healthy_ceiling {
             Decision::Tight
         } else {
             Decision::Healthy
         };
 
-        Some(AffordabilityVerdict {
+        AffordabilityVerdict {
             planned,
             headroom,
             decision,
-        })
+        }
     }
 }
 
@@ -178,54 +202,88 @@ mod tests {
     }
 
     #[test]
-    fn no_budget_configured_refuses_a_verdict() {
+    fn income_derived_budget_always_returns_a_verdict() {
         let policy = BudgetPolicy {
-            monthly_cost_budget: None,
-            tight_share_basis_points: 1_000,
+            monthly_income: money(dec!(10_000)),
         };
         let summary = MonthSummary::default_of_costs(dec!(100));
-        assert!(policy.afford(&summary, money(dec!(10))).is_none());
+        // No "not configured" state — always returns a verdict.
+        let verdict = policy.afford(&summary, money(dec!(10)));
+        assert_eq!(verdict.decision, Decision::Healthy);
     }
 
     #[test]
-    fn healthy_above_tight_share_and_blocked_at_zero() {
+    fn healthy_below_70_percent_tight_70_to_85_blocked_above_85() {
         let policy = BudgetPolicy {
-            monthly_cost_budget: Some(money(dec!(10_000))),
-            tight_share_basis_points: 1_000,
+            monthly_income: money(dec!(10_000)),
         };
-        let spent = MonthSummary::default_of_costs(dec!(6_000));
+        // 70% of 10 000 = 7 000, 85% = 8 500
 
-        // 4 000 left of 10 000 = above the 10 % line.
+        // 5 000 costs = 50% → Healthy
+        let spent = MonthSummary::default_of_costs(dec!(5_000));
         assert_eq!(
-            policy.afford(&spent, money(dec!(0))).unwrap().decision,
+            policy.afford(&spent, money(dec!(0))).decision,
             Decision::Healthy
         );
-        // Taking 3 500 more leaves 500 = below the 1 000 line but positive.
+
+        // 7 500 costs = 75% → Tight (above 70%, below 85%)
+        let spent = MonthSummary::default_of_costs(dec!(7_500));
         assert_eq!(
-            policy.afford(&spent, money(dec!(3_500))).unwrap().decision,
+            policy.afford(&spent, money(dec!(0))).decision,
             Decision::Tight
         );
-        // Taking 4 000 more leaves zero: blocked, not tight.
+
+        // 8 500 costs = 85% → Blocked (at the ceiling)
+        let spent = MonthSummary::default_of_costs(dec!(8_500));
         assert_eq!(
-            policy.afford(&spent, money(dec!(4_000))).unwrap().decision,
+            policy.afford(&spent, money(dec!(0))).decision,
             Decision::Blocked
         );
-        // Overdrawing goes negative and stays Blocked.
+
+        // 9 000 costs = 90% → Blocked (over the ceiling)
+        let spent = MonthSummary::default_of_costs(dec!(9_000));
         assert_eq!(
-            policy.afford(&spent, money(dec!(5_000))).unwrap().decision,
+            policy.afford(&spent, money(dec!(0))).decision,
             Decision::Blocked
         );
+
+        // Planned spend pushes total over 85%: 6 000 costs + 3 000 planned = 90%
+        let spent = MonthSummary::default_of_costs(dec!(6_000));
+        assert_eq!(
+            policy.afford(&spent, money(dec!(3_000))).decision,
+            Decision::Blocked
+        );
+
+        // Planned spend pushes total into Tight: 5 000 costs + 2 500 planned = 75%
+        let spent = MonthSummary::default_of_costs(dec!(5_000));
+        assert_eq!(
+            policy.afford(&spent, money(dec!(2_500))).decision,
+            Decision::Tight
+        );
+    }
+
+    #[test]
+    fn derived_ceilings_are_correct_fractions_of_income() {
+        let policy = BudgetPolicy {
+            monthly_income: money(dec!(26_500)),
+        };
+        // 70% of 26 500 = 18 550
+        assert_eq!(policy.healthy_ceiling().amount(), dec!(18_550));
+        // 80% of 26 500 = 21 200
+        assert_eq!(policy.stretch_ceiling().amount(), dec!(21_200));
+        // 85% of 26 500 = 22 525
+        assert_eq!(policy.max_ceiling().amount(), dec!(22_525));
     }
 
     #[test]
     fn verdict_serializes_amounts_as_decimal_strings() {
         let policy = BudgetPolicy {
-            monthly_cost_budget: Some(money(dec!(1_000))),
-            tight_share_basis_points: 1_000,
+            monthly_income: money(dec!(10_000)),
         };
         let summary = MonthSummary::default_of_costs(dec!(100));
-        let json = serde_json::to_value(policy.afford(&summary, money(dec!(50))).unwrap()).unwrap();
-        assert_eq!(json["headroom"], "850");
+        let json = serde_json::to_value(policy.afford(&summary, money(dec!(50)))).unwrap();
+        // headroom = 8500 - 100 - 50 = 8350
+        assert_eq!(json["headroom"], "8350");
         assert_eq!(json["planned"], "50");
     }
 

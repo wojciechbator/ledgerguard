@@ -29,7 +29,7 @@ impl PgLedgerRepository {
     pub async fn load_budget_settings(&self) -> Result<Option<BudgetSettings>, RepositoryError> {
         let row = sqlx::query(
             r#"
-            SELECT monthly_cost_budget, monthly_income, tight_share_basis_points
+            SELECT monthly_income
               FROM budget_settings
              WHERE id = 1
             "#,
@@ -40,16 +40,9 @@ impl PgLedgerRepository {
 
         let Some(row) = row else { return Ok(None) };
 
-        let monthly_cost_budget: Option<rust_decimal::Decimal> = row.get("monthly_cost_budget");
         let monthly_income: rust_decimal::Decimal = row.get("monthly_income");
-        let tight_share_basis_points: i16 = row.get("tight_share_basis_points");
 
-        parse_budget_row(
-            monthly_cost_budget,
-            monthly_income,
-            tight_share_basis_points,
-        )
-        .map(Some)
+        parse_budget_row(monthly_income).map(Some)
     }
 
     /// Inserts or replaces the single budget settings row.
@@ -57,26 +50,18 @@ impl PgLedgerRepository {
         &self,
         settings: &BudgetSettings,
     ) -> Result<(), RepositoryError> {
-        let monthly_cost_budget: Option<rust_decimal::Decimal> =
-            settings.monthly_cost_budget.map(|m| m.amount());
         let monthly_income = settings.monthly_income.amount();
-        let tight_share_basis_points =
-            settings.tight_share_basis_points.min(i16::MAX as u16) as i16;
 
         sqlx::query(
             r#"
-            INSERT INTO budget_settings (id, monthly_cost_budget, monthly_income, tight_share_basis_points)
-            VALUES (1, $1, $2, $3)
+            INSERT INTO budget_settings (id, monthly_income)
+            VALUES (1, $1)
             ON CONFLICT (id) DO UPDATE SET
-                monthly_cost_budget = EXCLUDED.monthly_cost_budget,
                 monthly_income = EXCLUDED.monthly_income,
-                tight_share_basis_points = EXCLUDED.tight_share_basis_points,
                 updated_at = now()
             "#,
         )
-        .bind(monthly_cost_budget)
         .bind(monthly_income)
-        .bind(tight_share_basis_points)
         .execute(&self.pool)
         .await
         .map_err(|err| RepositoryError::Storage(err.to_string()))?;
@@ -92,25 +77,18 @@ pub async fn save_budget_to_pool(
     pool: &PgPool,
     settings: &BudgetSettings,
 ) -> Result<(), RepositoryError> {
-    let monthly_cost_budget: Option<rust_decimal::Decimal> =
-        settings.monthly_cost_budget.map(|m| m.amount());
     let monthly_income = settings.monthly_income.amount();
-    let tight_share_basis_points = settings.tight_share_basis_points.min(i16::MAX as u16) as i16;
 
     sqlx::query(
         r#"
-        INSERT INTO budget_settings (id, monthly_cost_budget, monthly_income, tight_share_basis_points)
-        VALUES (1, $1, $2, $3)
+        INSERT INTO budget_settings (id, monthly_income)
+        VALUES (1, $1)
         ON CONFLICT (id) DO UPDATE SET
-            monthly_cost_budget = EXCLUDED.monthly_cost_budget,
             monthly_income = EXCLUDED.monthly_income,
-            tight_share_basis_points = EXCLUDED.tight_share_basis_points,
             updated_at = now()
         "#,
     )
-    .bind(monthly_cost_budget)
     .bind(monthly_income)
-    .bind(tight_share_basis_points)
     .execute(pool)
     .await
     .map_err(|err| RepositoryError::Storage(err.to_string()))?;

@@ -212,10 +212,10 @@
         <h2>Budżet miesięczny</h2>
         <div class="fields" style="margin-top:10px">
           <label>Oczekiwany dochód (PLN) <input id="thomann-income" inputmode="decimal" value="26500"></label>
-          <label>Budżet kosztów (PLN) <input id="thomann-budget" inputmode="decimal" placeholder="np. 15000"></label>
         </div>
         <button id="thomann-save-budget" class="secondary" style="margin-top:10px">Zapisz budżet</button>
         <div class="notice" id="thomann-budget-status"></div>
+        <div id="thomann-budget-thresholds" style="margin-top:8px;font-size:.85rem;color:var(--muted,#a0a8bc)"></div>
       </aside>
     </div>
   </section>
@@ -272,6 +272,7 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
+  let affiliateItems = [];
   const tokenInput = $("token");
   tokenInput.value = localStorage.getItem("ledgerguard_token") || "";
 
@@ -591,15 +592,16 @@
         try {
           const afford = await api(`/v1/planner/affordability?amount=${encodeURIComponent(data.total)}`);
           const cls = afford.decision ? afford.decision.toLowerCase() : "unknown";
-          const label = afford.decision ? afford.decision.toUpperCase() : "BRAK BUDŻETU";
+          const label = afford.decision ? afford.decision.toUpperCase() : "BRAK WERDYKTU";
           const expectedIncome = parseFloat(afford.expected_monthly_income);
           const costsMtd = parseFloat(afford.costs);
           const basketTotal = parseFloat(data.total);
           const projectedNet = expectedIncome - costsMtd - basketTotal;
           const detail = `${afford.message} Koszty MTD: ${format(afford.costs)}.`;
-          const headroom = afford.headroom !== null ? `<div style="font-size:.85rem;margin-top:4px">Pozostaje w budżecie: ${format(afford.headroom)}</div>` : "";
+          const headroom = `<div style="font-size:.85rem;margin-top:4px">Pozostaje w budżecie (85%): ${format(afford.headroom)}</div>`;
+          const thresholds = `<div style="font-size:.8rem;margin-top:4px;color:var(--muted,#a0a8bc)">70%: ${format(afford.healthy_ceiling)} · 80%: ${format(afford.stretch_ceiling)} · 85%: ${format(afford.max_ceiling)}</div>`;
           const incomeLine = `<div style="font-size:.85rem;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.1)">Oczekiwany dochód: ${format(afford.expected_monthly_income)} PLN</div><div style="font-size:.85rem;margin-top:2px">Projekcja netto po zakupie: <strong>${projectedNet >= 0 ? "+" : ""}${format(projectedNet.toFixed(2))} PLN</strong></div>`;
-          verdictHtml = `<div style="padding:16px;border-radius:10px;margin-top:12px;text-align:center;font-size:1.1rem;font-weight:bold" class="${cls === 'healthy' ? 'ok' : cls === 'tight' ? 'warn' : cls === 'blocked' ? 'bad' : 'muted'}" >${label}<div style="font-size:.85rem;font-weight:normal;margin-top:4px">${detail}</div>${headroom}${incomeLine}</div>`;
+          verdictHtml = `<div style="padding:16px;border-radius:10px;margin-top:12px;text-align:center;font-size:1.1rem;font-weight:bold" class="${cls === 'healthy' ? 'ok' : cls === 'tight' ? 'warn' : cls === 'blocked' ? 'bad' : 'muted'}" >${label}<div style="font-size:.85rem;font-weight:normal;margin-top:4px">${detail}</div>${headroom}${thresholds}${incomeLine}</div>`;
         } catch (e) {
           verdictHtml = `<div class="notice" style="margin-top:12px">Nie udało się sprawdzić budżetu: ${e.message}</div>`;
         }
@@ -622,11 +624,18 @@
         ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:2px solid #292f3d;margin-top:8px;font-size:1.2rem;font-weight:bold"><span>Razem (${data.resolvable_count} pozycji)</span><span>${format(data.total)} ${data.currency || ""}</span></div>`
         : "";
 
-      // Affiliate links box
-      const affiliateLinks = data.items.filter(i => !i.error).map(i => i.affiliate_url).join("\n");
-      const linksHtml = affiliateLinks
-        ? `<div style="margin-top:12px"><h2 style="font-size:14px;margin-bottom:8px">Linki afiliacyjne</h2><textarea id="thomann-affiliate-output" readonly style="width:100%;height:80px;font-size:.8rem;border-radius:11px;border:1px solid #303747;background:#10131a;color:#f5f7fb;padding:11px 12px;font:inherit;resize:vertical">${affiliateLinks}</textarea></div>`
-        : "";
+      // Affiliate links box — each link gets its own copy button
+      affiliateItems = data.items.filter(i => !i.error);
+      const affiliateLinks = affiliateItems.map(i => i.affiliate_url).join("\n");
+      let linksHtml = "";
+      if (affiliateItems.length) {
+        let rowsHtml = "";
+        for (const item of affiliateItems) {
+          const url = item.affiliate_url;
+          rowsHtml += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><input readonly value="${url.replace(/"/g, "&quot;")}" style="flex:1;border-radius:8px;border:1px solid #303747;background:#10131a;color:#f5f7fb;padding:8px;font-size:.8rem;font-family:monospace;overflow:hidden;text-overflow:ellipsis" title="${url.replace(/"/g, "&quot;")}"><button class="copy-single" data-url="${url.replace(/"/g, "&quot;")}" style="white-space:nowrap;padding:8px 12px;font-size:.8rem;border-radius:8px;border:1px solid #303747;background:#171b26;color:#f5f7fb;cursor:pointer">Kopiuj</button></div>`;
+        }
+        linksHtml = `<div style="margin-top:12px"><h2 style="font-size:14px;margin-bottom:8px">Linki afiliacyjne</h2>${rowsHtml}</div>`;
+      }
 
       $("thomann-result").innerHTML = tableHtml + totalHtml + verdictHtml + linksHtml;
       $("thomann-status").textContent = `${data.resolvable_count}/${data.items.length} linków rozwiązanych.`;
@@ -639,18 +648,40 @@
   };
 
   $("thomann-copy").onclick = async () => {
-    const el = $("thomann-affiliate-output");
-    if (!el) return;
-    const text = el.value || el.textContent;
+    const text = affiliateItems.map(i => i.affiliate_url).join("\n");
+    if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      el.select();
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
       document.execCommand("copy");
+      document.body.removeChild(ta);
     }
     $("thomann-copy").textContent = "Skopiowano!";
     setTimeout(() => { $("thomann-copy").textContent = "Kopiuj linki afiliacyjne"; }, 2000);
   };
+
+  // Per-link copy buttons (delegated since links are rendered dynamically)
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".copy-single");
+    if (!btn) return;
+    const url = btn.dataset.url;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = url;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    btn.textContent = "Skopiowano!";
+    setTimeout(() => { btn.textContent = "Kopiuj"; }, 2000);
+  });
 
   // Budget cache — shared between loadThomannBudget and loadTrends so
   // we don't fetch /v1/budget twice on the same page load. Invalidated
@@ -670,20 +701,19 @@
     try {
       const b = await fetchBudget();
       $("thomann-income").value = b.monthly_income;
-      $("thomann-budget").value = b.monthly_cost_budget || "";
+      $("thomann-budget-thresholds").innerHTML = `Budżet 70%: <strong>${format(b.healthy_ceiling)}</strong> · Stretch 80%: <strong>${format(b.stretch_ceiling)}</strong> · Max 85%: <strong>${format(b.max_ceiling)}</strong> PLN`;
     } catch (e) { $("thomann-budget-status").textContent = "Budżet: " + e.message; }
   }
   $("thomann-save-budget").onclick = async () => {
     const body = {};
     const income = $("thomann-income").value.trim().replace(",", ".");
-    const budget = $("thomann-budget").value.trim().replace(",", ".");
     if (income) body.monthly_income = income;
-    if (budget !== undefined) body.monthly_cost_budget = budget;
     $("thomann-budget-status").textContent = "Zapisuję…";
     try {
       const r = await api("/v1/budget", { method: "POST", body: JSON.stringify(body) });
       invalidateBudgetCache();
-      $("thomann-budget-status").textContent = "✓ Zapisano. Dochód: " + r.monthly_income + " PLN, budżet: " + (r.monthly_cost_budget || "brak");
+      $("thomann-budget-status").textContent = "✓ Zapisano. Dochód: " + r.monthly_income + " PLN";
+      $("thomann-budget-thresholds").innerHTML = `Budżet 70%: <strong>${format(r.healthy_ceiling)}</strong> · Stretch 80%: <strong>${format(r.stretch_ceiling)}</strong> · Max 85%: <strong>${format(r.max_ceiling)}</strong> PLN`;
     } catch (e) { $("thomann-budget-status").textContent = "Błąd: " + e.message; }
   };
 
@@ -730,7 +760,7 @@
         api("/v1/costs/trends?months=12"),
         fetchBudget().catch(() => null),
       ]);
-      const budget = budgetResp && budgetResp.monthly_cost_budget ? parseFloat(budgetResp.monthly_cost_budget) : 0;
+      const budget = budgetResp && budgetResp.max_ceiling ? parseFloat(budgetResp.max_ceiling) : 0;
       renderTrends(r.months || [], budget);
     } catch (e) {
       $("trends-table").innerHTML = `<p class="notice">Błąd: ${e.message}</p>`;

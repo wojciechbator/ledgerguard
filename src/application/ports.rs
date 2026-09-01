@@ -37,14 +37,9 @@ fn decimal_to_money(value: Decimal) -> Result<Money, RepositoryError> {
 /// Parses a `budget_settings` row into `BudgetSettings`. Shared by the
 /// postgres implementation and tests.
 pub fn parse_budget_row(
-    monthly_cost_budget: Option<rust_decimal::Decimal>,
     monthly_income: rust_decimal::Decimal,
-    tight_share_basis_points: i16,
 ) -> Result<BudgetSettings, RepositoryError> {
     Ok(BudgetSettings {
-        monthly_cost_budget: monthly_cost_budget.map(decimal_to_money).transpose()?,
         monthly_income: decimal_to_money(monthly_income)?,
-        tight_share_basis_points: u16::try_from(tight_share_basis_points)
-            .map_err(|err| RepositoryError::Storage(err.to_string()))?,
     })
 }

@@ -102,13 +102,8 @@ pub struct WfirmaSettings {
 
 #[derive(Debug, Clone)]
 pub struct BudgetSettings {
-    /// Planned cost ceiling per calendar month. `None` disables affordability
-    /// verdicts instead of guessing one.
-    pub monthly_cost_budget: Option<Money>,
-    /// Remaining-budget share (basis points) at which the verdict turns Tight.
-    pub tight_share_basis_points: u16,
-    /// Expected monthly income (gross PLN). Used as a default projection when
-    /// actual revenue entries for the month are sparse or absent. Defaults to
+    /// Expected monthly income (gross PLN). The cost budget is derived from
+    /// this: 70% = Healthy ceiling, 85% = Blocked ceiling. Defaults to
     /// 26 500 PLN — override with `LEDGERGUARD_MONTHLY_INCOME`.
     pub monthly_income: Money,
 }
@@ -200,44 +195,19 @@ impl Config {
         }
 
         let budget = BudgetSettings {
-            monthly_cost_budget: match optional_env("LEDGERGUARD_MONTHLY_COST_BUDGET") {
-                Some(raw) => Some(
-                    Decimal::from_str(&raw)
-                        .ok()
-                        .and_then(|value| Money::non_negative(value).ok())
-                        .with_context(|| {
-                            format!("LEDGERGUARD_MONTHLY_COST_BUDGET must be a non-negative decimal, got {raw:?}")
-                        })?,
-                ),
-                None => None,
-            },
-            tight_share_basis_points: match optional_env("LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS") {
-                Some(raw) => raw.parse::<u16>().map_err(|error| {
-                    anyhow::anyhow!("invalid LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS {raw:?}: {error}")
-                })?,
-                None => 1_000,
-            },
             monthly_income: match optional_env("LEDGERGUARD_MONTHLY_INCOME") {
                 Some(raw) => Decimal::from_str(&raw)
                     .ok()
                     .and_then(|value| Money::non_negative(value).ok())
                     .with_context(|| {
-                        format!("LEDGERGUARD_MONTHLY_INCOME must be a non-negative decimal, got {raw:?}")
+                        format!(
+                            "LEDGERGUARD_MONTHLY_INCOME must be a non-negative decimal, got {raw:?}"
+                        )
                     })?,
                 None => Money::non_negative(Decimal::new(2_650_000, 2))
                     .expect("26500.00 is a valid Money"),
             },
         };
-        if let Some(budget) = budget.monthly_cost_budget {
-            anyhow::ensure!(
-                budget.amount() > Decimal::ZERO,
-                "LEDGERGUARD_MONTHLY_COST_BUDGET must be greater than zero"
-            );
-        }
-        anyhow::ensure!(
-            budget.tight_share_basis_points <= 5_000,
-            "LEDGERGUARD_TIGHT_SHARE_BASIS_POINTS must be at most 5000"
-        );
 
         Ok(Self {
             bind_addr,
