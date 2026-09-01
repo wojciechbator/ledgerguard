@@ -72,7 +72,28 @@ async fn main() -> Result<()> {
         .await
         .context("failed to apply database migrations")?;
 
-    let ledger = Arc::new(PgLedgerRepository::new(pool.clone()));
+    let ledger_repo = Arc::new(PgLedgerRepository::new(pool.clone()));
+
+    // Load durable budget settings from DB. On first startup (no row yet),
+    // seed the table with env-derived defaults so the operator can edit
+    // them via the UI. After that, DB values take priority over env vars.
+    let budget = match ledger_repo.load_budget_settings().await {
+        Ok(Some(stored)) => {
+            info!("budget: loaded durable settings from DB");
+            stored
+        }
+        Ok(None) => {
+            info!("budget: no DB row yet, seeding env-derived defaults");
+            if let Err(error) = ledger_repo.save_budget_settings(&config.budget).await {
+                tracing::warn!(%error, "budget: failed to seed defaults to DB");
+            }
+            config.budget.clone()
+        }
+        Err(error) => {
+            tracing::warn!(%error, "budget: failed to load from DB, falling back to env defaults");
+            config.budget.clone()
+        }
+    };
 
     // Email ingest is enabled only when IMAP credentials are present.
     let email_ingest = if config.email_ingest.imap_username.is_some()
@@ -86,9 +107,9 @@ async fn main() -> Result<()> {
     let state = AppState {
         pool,
         accounting,
-        ledger,
+        ledger: ledger_repo.clone(),
         live_sync_enabled: config.runtime.live_sync_enabled,
-        budget: std::sync::Arc::new(std::sync::RwLock::new(config.budget.clone())),
+        budget: std::sync::Arc::new(std::sync::RwLock::new(budget)),
         email_ingest,
         tax: std::sync::Arc::new(config.tax.clone()),
     };

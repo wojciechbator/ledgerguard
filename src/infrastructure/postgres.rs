@@ -3,7 +3,8 @@ use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
 use crate::{
-    application::{LedgerRepository, RepositoryError},
+    application::{LedgerRepository, RepositoryError, parse_budget_row},
+    config::BudgetSettings,
     domain::{EntryKind, LedgerEntry, Money, Month, SourceSystem},
 };
 
@@ -22,6 +23,99 @@ impl PgLedgerRepository {
     pub const fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// Loads durable budget settings from DB. Returns `None` if no row
+    /// exists yet (first startup).
+    pub async fn load_budget_settings(&self) -> Result<Option<BudgetSettings>, RepositoryError> {
+        let row = sqlx::query(
+            r#"
+            SELECT monthly_cost_budget, monthly_income, tight_share_basis_points
+              FROM budget_settings
+             WHERE id = 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| RepositoryError::Storage(err.to_string()))?;
+
+        let Some(row) = row else { return Ok(None) };
+
+        let monthly_cost_budget: Option<rust_decimal::Decimal> = row.get("monthly_cost_budget");
+        let monthly_income: rust_decimal::Decimal = row.get("monthly_income");
+        let tight_share_basis_points: i16 = row.get("tight_share_basis_points");
+
+        parse_budget_row(
+            monthly_cost_budget,
+            monthly_income,
+            tight_share_basis_points,
+        )
+        .map(Some)
+    }
+
+    /// Inserts or replaces the single budget settings row.
+    pub async fn save_budget_settings(
+        &self,
+        settings: &BudgetSettings,
+    ) -> Result<(), RepositoryError> {
+        let monthly_cost_budget: Option<rust_decimal::Decimal> =
+            settings.monthly_cost_budget.map(|m| m.amount());
+        let monthly_income = settings.monthly_income.amount();
+        let tight_share_basis_points =
+            i16::try_from(settings.tight_share_basis_points).unwrap_or(0);
+
+        sqlx::query(
+            r#"
+            INSERT INTO budget_settings (id, monthly_cost_budget, monthly_income, tight_share_basis_points)
+            VALUES (1, $1, $2, $3)
+            ON CONFLICT (id) DO UPDATE SET
+                monthly_cost_budget = EXCLUDED.monthly_cost_budget,
+                monthly_income = EXCLUDED.monthly_income,
+                tight_share_basis_points = EXCLUDED.tight_share_basis_points,
+                updated_at = now()
+            "#,
+        )
+        .bind(monthly_cost_budget)
+        .bind(monthly_income)
+        .bind(tight_share_basis_points)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| RepositoryError::Storage(err.to_string()))?;
+
+        Ok(())
+    }
+}
+
+/// Free function that persists budget settings to the given pool.
+/// Used by the API handler to avoid storing a `PgLedgerRepository` in
+/// `AppState` (which would require importing the concrete type).
+pub async fn save_budget_to_pool(
+    pool: &PgPool,
+    settings: &BudgetSettings,
+) -> Result<(), RepositoryError> {
+    let monthly_cost_budget: Option<rust_decimal::Decimal> =
+        settings.monthly_cost_budget.map(|m| m.amount());
+    let monthly_income = settings.monthly_income.amount();
+    let tight_share_basis_points = i16::try_from(settings.tight_share_basis_points).unwrap_or(0);
+
+    sqlx::query(
+        r#"
+        INSERT INTO budget_settings (id, monthly_cost_budget, monthly_income, tight_share_basis_points)
+        VALUES (1, $1, $2, $3)
+        ON CONFLICT (id) DO UPDATE SET
+            monthly_cost_budget = EXCLUDED.monthly_cost_budget,
+            monthly_income = EXCLUDED.monthly_income,
+            tight_share_basis_points = EXCLUDED.tight_share_basis_points,
+            updated_at = now()
+        "#,
+    )
+    .bind(monthly_cost_budget)
+    .bind(monthly_income)
+    .bind(tight_share_basis_points)
+    .execute(pool)
+    .await
+    .map_err(|err| RepositoryError::Storage(err.to_string()))?;
+
+    Ok(())
 }
 
 #[async_trait]

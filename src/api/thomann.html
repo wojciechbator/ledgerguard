@@ -211,10 +211,15 @@ td.error{color:var(--bad);font-size:.8rem}
     }
   };
 
-  $("copy-affiliate").onclick = () => {
+  $("copy-affiliate").onclick = async () => {
     const el = $("affiliate-output");
-    el.select();
-    document.execCommand("copy");
+    const text = el.value || el.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      el.select();
+      document.execCommand("copy");
+    }
     $("copy-affiliate").textContent = "Skopiowano!";
     setTimeout(() => { $("copy-affiliate").textContent = "Kopiuj linki afiliacyjne"; }, 2000);
   };

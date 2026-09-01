@@ -1236,49 +1236,69 @@ async fn update_budget(
     State(state): State<AppState>,
     Json(request): Json<UpdateBudgetRequest>,
 ) -> Result<Json<BudgetResponse>, ApiError> {
-    let mut budget = state.budget.write().unwrap_or_else(|e| e.into_inner());
+    // Validate and apply updates within a scoped block so the
+    // RwLockWriteGuard is dropped before any .await — holding a
+    // std::sync guard across an await makes the future !Send.
+    let snapshot = {
+        let mut budget = state.budget.write().unwrap_or_else(|e| e.into_inner());
 
-    if let Some(income_str) = request.monthly_income.as_deref().map(str::trim) {
-        if income_str.is_empty() {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_income",
-                "monthly_income must be a non-empty decimal",
-            ));
-        }
-        let income_decimal = Decimal::from_str(income_str).map_err(|_| {
-            ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_income",
-                "monthly_income must be a decimal like 26500 or 26500.00",
-            )
-        })?;
-        budget.monthly_income = Money::non_negative(income_decimal)
-            .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "invalid_income", e.to_string()))?;
-    }
-
-    if let Some(budget_str) = request.monthly_cost_budget.as_deref().map(str::trim) {
-        if budget_str.is_empty() {
-            budget.monthly_cost_budget = None;
-        } else {
-            let budget_decimal = Decimal::from_str(budget_str).map_err(|_| {
+        if let Some(income_str) = request.monthly_income.as_deref().map(str::trim) {
+            if income_str.is_empty() {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_income",
+                    "monthly_income must be a non-empty decimal",
+                ));
+            }
+            let income_decimal = Decimal::from_str(income_str).map_err(|_| {
                 ApiError::new(
                     StatusCode::BAD_REQUEST,
-                    "invalid_budget",
-                    "monthly_cost_budget must be a decimal like 15000 or 15000.00",
+                    "invalid_income",
+                    "monthly_income must be a decimal like 26500 or 26500.00",
                 )
             })?;
-            budget.monthly_cost_budget =
-                Some(Money::non_negative(budget_decimal).map_err(|e| {
-                    ApiError::new(StatusCode::BAD_REQUEST, "invalid_budget", e.to_string())
-                })?);
+            budget.monthly_income = Money::non_negative(income_decimal).map_err(|e| {
+                ApiError::new(StatusCode::BAD_REQUEST, "invalid_income", e.to_string())
+            })?;
         }
+
+        if let Some(budget_str) = request.monthly_cost_budget.as_deref().map(str::trim) {
+            if budget_str.is_empty() {
+                budget.monthly_cost_budget = None;
+            } else {
+                let budget_decimal = Decimal::from_str(budget_str).map_err(|_| {
+                    ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_budget",
+                        "monthly_cost_budget must be a decimal like 15000 or 15000.00",
+                    )
+                })?;
+                budget.monthly_cost_budget =
+                    Some(Money::non_negative(budget_decimal).map_err(|e| {
+                        ApiError::new(StatusCode::BAD_REQUEST, "invalid_budget", e.to_string())
+                    })?);
+            }
+        }
+
+        budget.clone()
+    };
+
+    // Persist the updated settings to DB so they survive restarts.
+    if let Err(error) =
+        crate::infrastructure::postgres::save_budget_to_pool(&state.pool, &snapshot).await
+    {
+        error!(%error, "failed to persist budget settings to DB");
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "budget_persist_failed",
+            "budget updated in memory but failed to persist to DB",
+        ));
     }
 
     Ok(Json(BudgetResponse {
-        monthly_cost_budget: budget.monthly_cost_budget.map(|m| m.amount().to_string()),
-        monthly_income: budget.monthly_income.amount().to_string(),
-        tight_share_basis_points: budget.tight_share_basis_points,
+        monthly_cost_budget: snapshot.monthly_cost_budget.map(|m| m.amount().to_string()),
+        monthly_income: snapshot.monthly_income.amount().to_string(),
+        tight_share_basis_points: snapshot.tight_share_basis_points,
     }))
 }
 

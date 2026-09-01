@@ -638,19 +638,35 @@
     }
   };
 
-  $("thomann-copy").onclick = () => {
+  $("thomann-copy").onclick = async () => {
     const el = $("thomann-affiliate-output");
     if (!el) return;
-    el.select();
-    document.execCommand("copy");
+    const text = el.value || el.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      el.select();
+      document.execCommand("copy");
+    }
     $("thomann-copy").textContent = "Skopiowano!";
     setTimeout(() => { $("thomann-copy").textContent = "Kopiuj linki afiliacyjne"; }, 2000);
   };
 
+  // Budget cache — shared between loadThomannBudget and loadTrends so
+  // we don't fetch /v1/budget twice on the same page load. Invalidated
+  // on save and on manual refresh.
+  let budgetCache = null;
+  async function fetchBudget() {
+    if (budgetCache) return budgetCache;
+    budgetCache = await api("/v1/budget");
+    return budgetCache;
+  }
+  function invalidateBudgetCache() { budgetCache = null; }
+
   // Thomann budget load + save
   async function loadThomannBudget() {
     try {
-      const b = await api("/v1/budget");
+      const b = await fetchBudget();
       $("thomann-income").value = b.monthly_income;
       $("thomann-budget").value = b.monthly_cost_budget || "";
     } catch (e) { $("thomann-budget-status").textContent = "Budżet: " + e.message; }
@@ -664,6 +680,7 @@
     $("thomann-budget-status").textContent = "Zapisuję…";
     try {
       const r = await api("/v1/budget", { method: "POST", body: JSON.stringify(body) });
+      invalidateBudgetCache();
       $("thomann-budget-status").textContent = "✓ Zapisano. Dochód: " + r.monthly_income + " PLN, budżet: " + (r.monthly_cost_budget || "brak");
     } catch (e) { $("thomann-budget-status").textContent = "Błąd: " + e.message; }
   };
@@ -709,7 +726,7 @@
     try {
       const [r, budgetResp] = await Promise.all([
         api("/v1/costs/trends?months=12"),
-        api("/v1/budget").catch(() => null),
+        fetchBudget().catch(() => null),
       ]);
       const budget = budgetResp && budgetResp.monthly_cost_budget ? parseFloat(budgetResp.monthly_cost_budget) : 0;
       renderTrends(r.months || [], budget);
@@ -765,9 +782,12 @@
       } catch (_) {}
       const r = await api("/v1/ingest/email", { method: "POST" });
       $("ingest-result").textContent = r.message || "Ingestion started";
-      // Poll for results every 5s, up to 2 minutes
+      // Poll with exponential backoff: 5s, 5s, 10s, 10s, 15s, 15s, 20s, ...
+      // capped at 30s, max 12 polls (~3 min total). Reduces server load
+      // vs the previous fixed 5s/24-poll pattern.
       let polls = 0;
-      const maxPolls = 24;
+      const maxPolls = 12;
+      const pollDelay = (n) => Math.min(5000 * Math.ceil(n / 2), 30000);
       const poll = async () => {
         polls++;
         try {
@@ -784,7 +804,7 @@
           } else {
             $("ingest-result").textContent = `Przetwarzam… (poll ${polls}/${maxPolls})`;
           }
-          if (polls < maxPolls) setTimeout(poll, 5000);
+          if (polls < maxPolls) setTimeout(poll, pollDelay(polls));
         } catch (e) { /* ignore poll errors */ }
       };
       setTimeout(poll, 5000);
