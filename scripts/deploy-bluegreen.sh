@@ -388,8 +388,6 @@ trap - ERR INT TERM HUP
 
 python3 "$RECEIPT_HELPER" finalize \
   --state-dir "$RELEASE_STATE_DIR" \
-  --release-id "$RELEASE_ID" \
-  --service ledgerguard \
-  --source-sha "$TARGET" >/dev/null
+  --release-id "$RELEASE_ID" >/dev/null
 
 printf '\nLEDGERGUARD_BLUEGREEN=PASS sha=%s cutover=graceful-reload old=%s stopped new=%s active\n' "$TARGET" "$CURRENT_APP" "$NEW_APP"
