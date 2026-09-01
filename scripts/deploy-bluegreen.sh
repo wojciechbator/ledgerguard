@@ -187,6 +187,7 @@ fi
 printf '\n==> 3/8 — Run migrations\n'
 docker run --rm \
   --network ledgerguard_database \
+  --env-file "$ENV_FILE" \
   -e DATABASE_URL="postgres://ledgerguard:$(grep -E '^POSTGRES_PASSWORD=' "$ENV_FILE" | head -1 | cut -d= -f2-)@postgres:5432/ledgerguard" \
   -e RUST_LOG="${RUST_LOG:-info}" \
   "ledgerguard:${GREEN_TAG}" migrate
