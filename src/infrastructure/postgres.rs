@@ -61,7 +61,7 @@ impl PgLedgerRepository {
             settings.monthly_cost_budget.map(|m| m.amount());
         let monthly_income = settings.monthly_income.amount();
         let tight_share_basis_points =
-            i16::try_from(settings.tight_share_basis_points).unwrap_or(0);
+            settings.tight_share_basis_points.min(i16::MAX as u16) as i16;
 
         sqlx::query(
             r#"
@@ -95,7 +95,7 @@ pub async fn save_budget_to_pool(
     let monthly_cost_budget: Option<rust_decimal::Decimal> =
         settings.monthly_cost_budget.map(|m| m.amount());
     let monthly_income = settings.monthly_income.amount();
-    let tight_share_basis_points = i16::try_from(settings.tight_share_basis_points).unwrap_or(0);
+    let tight_share_basis_points = settings.tight_share_basis_points.min(i16::MAX as u16) as i16;
 
     sqlx::query(
         r#"

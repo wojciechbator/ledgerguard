@@ -654,14 +654,16 @@
 
   // Budget cache — shared between loadThomannBudget and loadTrends so
   // we don't fetch /v1/budget twice on the same page load. Invalidated
-  // on save and on manual refresh.
-  let budgetCache = null;
-  async function fetchBudget() {
-    if (budgetCache) return budgetCache;
-    budgetCache = await api("/v1/budget");
-    return budgetCache;
+  // on save and on manual refresh. Caches the in-flight promise so
+  // parallel callers don't issue duplicate requests.
+  let budgetPromise = null;
+  function fetchBudget() {
+    if (!budgetPromise) {
+      budgetPromise = api("/v1/budget").catch((e) => { budgetPromise = null; throw e; });
+    }
+    return budgetPromise;
   }
-  function invalidateBudgetCache() { budgetCache = null; }
+  function invalidateBudgetCache() { budgetPromise = null; }
 
   // Thomann budget load + save
   async function loadThomannBudget() {
@@ -789,6 +791,7 @@
       const maxPolls = 12;
       const pollDelay = (n) => Math.min(5000 * Math.ceil(n / 2), 30000);
       const poll = async () => {
+        if (document.hidden) { if (polls < maxPolls) setTimeout(poll, pollDelay(polls)); return; }
         polls++;
         try {
           await loadCosts(costsYear, costsMonth);

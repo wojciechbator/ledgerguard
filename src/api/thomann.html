@@ -238,7 +238,7 @@ td.error{color:var(--bad);font-size:.8rem}
     const income = $("income-input").value.trim().replace(",", ".");
     const budget = $("budget-input").value.trim().replace(",", ".");
     if (income) body.monthly_income = income;
-    if (budget !== undefined) body.monthly_cost_budget = budget;
+    if (budget) body.monthly_cost_budget = budget;
     $("budget-status").textContent = "Zapisuję…";
     try {
       const r = await api("/v1/budget", { method: "POST", body: JSON.stringify(body) });
