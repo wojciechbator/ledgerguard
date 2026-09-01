@@ -27,7 +27,7 @@ const HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if run_utility_command()? {
+    if run_utility_command().await? {
         return Ok(());
     }
 
@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_utility_command() -> Result<bool> {
+async fn run_utility_command() -> Result<bool> {
     let Some(command) = env::args().nth(1) else {
         return Ok(false);
     };
@@ -174,14 +174,12 @@ fn run_utility_command() -> Result<bool> {
         }
         "ingest-email" => {
             init_tracing();
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(run_email_ingest())?;
+            run_email_ingest().await?;
             Ok(true)
         }
         "migrate" => {
             init_tracing();
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(run_migrate())?;
+            run_migrate().await?;
             Ok(true)
         }
         _ => bail!("unknown command: {command}"),
