@@ -19,6 +19,24 @@
       --muted:#7d8491; --text-secondary:#b7bfcc;
       --shadow-sm:0 1px 2px rgba(0,0,0,0.3);
       --radius-md:10px; --radius-sm:8px;
+      --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+      --t-fast:120ms cubic-bezier(0.16,1,0.3,1);
+      --t-med:200ms cubic-bezier(0.16,1,0.3,1);
+      --t-slow:320ms cubic-bezier(0.16,1,0.3,1);
+    }
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes fadeInUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes staggerIn{from{opacity:0;transform:translateY(8px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes scaleIn{from{opacity:0;transform:scale(0.96)}to{opacity:1;transform:scale(1)}}
+    @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes growBar{from{height:0%}to{height:var(--target-height)}}
+    @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(155,135,245,0.2)}50%{box-shadow:0 0 24px 4px rgba(155,135,245,0.12)}}
+    @media(prefers-reduced-motion:reduce){
+      *,*::before,*::after{
+        animation-duration:0.01ms!important;animation-iteration-count:1!important;
+        transition-duration:0.01ms!important;scroll-behavior:auto!important;
+      }
     }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: var(--surface-0); }
@@ -29,13 +47,17 @@
     p { color: var(--muted); line-height: 1.55; }
     .eyebrow { color: var(--muted); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 7px; }
     .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
-    .card { grid-column: span 12; background: var(--surface-1); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 20px; box-shadow: var(--shadow-sm); }
-    .status { grid-column: span 4; min-height: 96px; }
+    .card { grid-column: span 12; background: var(--surface-1); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 20px; box-shadow: var(--shadow-sm); transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-fast); }
+    .card:hover { border-color: var(--border-strong); box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+    .status { grid-column: span 4; min-height: 96px; animation: staggerIn var(--t-med) backwards; }
+    .status:nth-child(1){animation-delay:0ms}
+    .status:nth-child(2){animation-delay:40ms}
+    .status:nth-child(3){animation-delay:80ms}
     .planner { grid-column: span 8; }
     .side { grid-column: span 4; }
     .label { color: var(--muted); font-size: 12px; margin-bottom: 7px; }
-    .big { font-size: 23px; font-weight: 720; letter-spacing: -.03em; }
-    .hero { font-size: 36px; font-weight: 800; letter-spacing: -.04em; }
+    .big { font-size: 23px; font-weight: 720; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+    .hero { font-size: 36px; font-weight: 800; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
     .muted { color: var(--muted); }
     .ok { color: var(--good); }
     .warn { color: var(--warn); }
@@ -65,7 +87,7 @@
     .tab-btn:hover { color: #f7f7f8; background: rgba(155,135,245,0.06); }
     .tab-btn.active { color: #ddd7ff; background: rgba(155,135,245,0.12); box-shadow: inset 0 0 0 1px rgba(155,135,245,0.25); }
     .tab-content { display: none; }
-    .tab-content.active { display: block; }
+    .tab-content.active { display: block; animation: fadeIn var(--t-med); }
     /* Month selector */
     .month-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
     .month-nav button { width: auto; padding: 8px 14px; }
@@ -76,14 +98,32 @@
     .invoice-list th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; border-bottom: 1px solid var(--border-default); }
     .invoice-list td { padding: 8px; border-bottom: 1px solid var(--border-subtle); }
     .badge { background: var(--surface-3); padding: 4px 10px; border-radius: var(--radius-sm); font-size: 12px; }
-    /* Trends chart — flat bars, no gradients */
-    .bar-container { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; }
-    .bar { width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; transition: height .3s; }
+    /* Data table — shared compact style for all tables (kern/control-plane pattern) */
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 10px 8px; border-bottom: 1px solid var(--border-default); }
+    .data-table td { padding: 9px 8px; border-bottom: 1px solid var(--border-subtle); transition: background var(--t-fast); font-variant-numeric: tabular-nums; }
+    .data-table tbody tr { transition: background var(--t-fast); }
+    .data-table tbody tr:hover { background: rgba(155,135,245,0.04); }
+    .data-table td.num, .data-table th.num { text-align: right; }
+    .data-table td.center, .data-table th.center { text-align: center; }
+    .data-table tfoot tr { border-top: 1px solid var(--border-strong); }
+    .data-table tfoot td { border-bottom: none; padding-top: 12px; font-weight: 700; color: var(--text-secondary); }
+    .data-table tfoot td.num { color: var(--text); }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+    /* Trends chart — animated bars with hover tooltips */
+    .bar-container { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; cursor: pointer; }
+    .bar { width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; transition: height .5s cubic-bezier(0.16,1,0.3,1), filter var(--t-fast); animation: growBar .5s cubic-bezier(0.16,1,0.3,1) backwards; }
+    .bar:hover { filter: brightness(1.25); }
     .bar.ok { background: var(--good); }
     .bar.warn { background: var(--warn); }
     .bar.bad { background: var(--bad); }
     .bar-label { flex: 1; min-width: 0; font-size: 10px; color: var(--muted); margin-top: 4px; text-align: center; white-space: nowrap; overflow: hidden; }
-    .bar-value { font-size: 10px; color: var(--text-secondary); margin-bottom: 2px; white-space: nowrap; }
+    .bar-value { font-size: 10px; color: var(--text-secondary); margin-bottom: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    /* Chart tooltip */
+    .chart-tooltip { position: absolute; background: var(--surface-3); border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 12px; pointer-events: none; z-index: 10; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.4); transition: opacity var(--t-fast); }
+    .chart-tooltip .tt-month { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+    .chart-tooltip .tt-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .chart-tooltip .tt-detail { color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
     /* Cost progress bar — flat, no gradients */
     .cost-progress-wrap { margin-top: 14px; }
     .cost-progress-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
@@ -92,6 +132,22 @@
     .cost-progress-fill.ok { background: var(--good); }
     .cost-progress-fill.warn { background: var(--warn); }
     .cost-progress-fill.bad { background: var(--bad); }
+    /* Skeleton loading + button spinner */
+    .skeleton { background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: var(--radius-sm); }
+    .skeleton-line { height: 14px; margin-bottom: 6px; }
+    .skeleton-bar { height: 120px; width: 100%; }
+    .loading { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-default); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 6px; }
+    /* Table row stagger */
+    .data-table.stagger tbody tr { animation: staggerIn var(--t-med) backwards; }
+    .data-table.stagger tbody tr:nth-child(1){animation-delay:0ms}
+    .data-table.stagger tbody tr:nth-child(2){animation-delay:30ms}
+    .data-table.stagger tbody tr:nth-child(3){animation-delay:60ms}
+    .data-table.stagger tbody tr:nth-child(4){animation-delay:90ms}
+    .data-table.stagger tbody tr:nth-child(5){animation-delay:120ms}
+    .data-table.stagger tbody tr:nth-child(6){animation-delay:150ms}
+    .data-table.stagger tbody tr:nth-child(7){animation-delay:180ms}
+    .data-table.stagger tbody tr:nth-child(8){animation-delay:210ms}
+    .data-table.stagger tbody tr:nth-child(n+9){animation-delay:240ms}
     @media (min-width: 1000px) {
   .month-card { grid-column: span 7; }
   .month-card + .card.side { grid-column: span 5; }
@@ -170,8 +226,11 @@
     <div class="grid">
       <article class="card">
         <h2>Trendy kosztów (12 miesięcy)</h2>
-        <div id="trends-chart" style="display:flex;align-items:flex-end;gap:6px;height:160px;margin:16px 0 8px;padding:0 4px"></div>
-        <div id="trends-labels" style="display:flex;gap:6px;margin-bottom:12px;padding:0 4px"></div>
+        <div style="position:relative">
+          <div id="trends-chart" style="display:flex;align-items:flex-end;gap:6px;height:160px;margin:16px 0 8px;padding:0 4px"></div>
+          <div id="trends-labels" style="display:flex;gap:6px;margin-bottom:12px;padding:0 4px"></div>
+          <div id="chart-tooltip" class="chart-tooltip" style="display:none"></div>
+        </div>
         <div id="trends-table"></div>
       </article>
 
@@ -382,6 +441,10 @@
     const bootstrap = tokenInput.value.trim();
     if (!bootstrap) { $("sync-result").textContent = "Wpisz token najpierw."; return; }
     localStorage.setItem("ledgerguard_token", bootstrap);
+    const btn = $("connect");
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading"></span>Łączę…';
     $("sync-result").textContent = "Łączę...";
 
     // Exchange the bootstrap token for a per-device session token. The
@@ -415,6 +478,8 @@
     } catch (e) {
       $("sync-result").textContent = "Błąd: " + e.message;
     }
+    btn.disabled = false;
+    btn.textContent = origText;
   };
   $("forget-token").onclick = () => {
     localStorage.removeItem("ledgerguard_token");
@@ -424,12 +489,18 @@
     $("sync-result").textContent = "Token usunięty z tej przeglądarki.";
   };
   $("sync").onclick = async () => {
+    const btn = $("sync");
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading"></span>Synchronizuję…';
     const now = new Date();
     try {
       const r = await api("/v1/accounting/sync", {method:"POST", body:JSON.stringify({year:now.getFullYear(), month:now.getMonth()+1})});
       $("sync-result").textContent = `Sync OK: ${r.persisted ?? r.records ?? "gotowe"}`;
       await status();
     } catch (e) { $("sync-result").textContent = e.message; }
+    btn.disabled = false;
+    btn.textContent = origText;
   };
   async function loadMonth() {
     try {
@@ -491,13 +562,13 @@
       el.innerHTML = "";
       return;
     }
-    let html = `<h3 style="margin-top:16px;font-size:14px;color:#8b93a7">Ostatnie faktury</h3><table><thead><tr><th>Data</th><th>Dostawca</th><th>Kategoria</th><th style="text-align:right">Brutto</th></tr></thead><tbody>`;
+    let html = `<h3 style="margin-top:16px;font-size:14px;color:#8b93a7">Ostatnie faktury</h3><table class="data-table"><thead><tr><th>Data</th><th>Dostawca</th><th>Kategoria</th><th class="num">Brutto</th></tr></thead><tbody>`;
     for (const r of recent) {
       const date = r.booked_on;
       const vendor = r.counterparty || "—";
       const cat = r.category || "—";
       const gross = r.gross;
-      html += `<tr><td>${date}</td><td>${vendor}</td><td style="color:#8e97aa">${cat}</td><td style="text-align:right"><strong>${format(gross)}</strong></td></tr>`;
+      html += `<tr><td>${date}</td><td>${vendor}</td><td style="color:#8e97aa">${cat}</td><td class="num"><strong>${format(gross)}</strong></td></tr>`;
     }
     html += `</tbody></table>`;
     el.innerHTML = html;
@@ -545,6 +616,7 @@
     if (!urls.length) { $("thomann-status").textContent = "Wklej linky."; return; }
     $("thomann-status").textContent = `Sprawdzam ${urls.length} linków…`;
     $("thomann-check").disabled = true;
+    $("thomann-check").innerHTML = '<span class="loading"></span>Sprawdzam…';
     $("thomann-copy").style.display = "none";
     $("thomann-result").innerHTML = "";
     try {
@@ -610,12 +682,12 @@
       // Results table
       let tableHtml = "";
       if (data.items.length) {
-        tableHtml = `<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px"><thead><tr><th style="text-align:left">Produkt</th><th>Cena</th><th>Status</th></tr></thead><tbody>`;
+        tableHtml = `<table class="data-table"><thead><tr><th>Produkt</th><th class="num">Cena</th><th>Status</th></tr></thead><tbody>`;
         for (const item of data.items) {
           const title = item.title || item.original_url.split("/").pop()?.replace(/\.htm$/, "") || "—";
           const price = item.price ? `<strong>${format(item.price)}</strong> ${item.currency || ""}` : "—";
           const status = item.error ? `<span class="bad">${item.error}</span>` : "✓";
-          tableHtml += `<tr><td>${title}</td><td style="text-align:right;white-space:nowrap">${price}</td><td>${status}</td></tr>`;
+          tableHtml += `<tr><td>${title}</td><td class="num" style="white-space:nowrap">${price}</td><td>${status}</td></tr>`;
         }
         tableHtml += `</tbody></table>`;
       }
@@ -641,9 +713,11 @@
       $("thomann-status").textContent = `${data.resolvable_count}/${data.items.length} linków rozwiązanych.`;
       $("thomann-copy").style.display = affiliateLinks ? "inline-block" : "";
       $("thomann-check").disabled = false;
+      $("thomann-check").textContent = "Sprawdź ceny i budżet";
     } catch (e) {
       $("thomann-status").textContent = "Błąd: " + e.message;
       $("thomann-check").disabled = false;
+      $("thomann-check").textContent = "Sprawdź ceny i budżet";
     }
   };
 
@@ -734,11 +808,11 @@
       const total = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
       const totalNet = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_net || 0), 0);
       const totalVat = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_vat || 0), 0);
-      let html = `<table style="width:100%;border-collapse:collapse;margin-top:8px"><thead><tr><th style="text-align:left">Dostawca</th><th>Faktur</th><th>Netto</th><th>VAT</th><th>Brutto</th></tr></thead><tbody>`;
+      let html = `<table class="data-table"><thead><tr><th>Dostawca</th><th class="center">Faktur</th><th class="num">Netto</th><th class="num">VAT</th><th class="num">Brutto</th></tr></thead><tbody>`;
       for (const v of summary.by_vendor) {
-        html += `<tr><td>${v.vendor}</td><td style="text-align:center">${v.invoice_count}</td><td>${format(v.total_net || "0")}</td><td>${format(v.total_vat || "0")}</td><td><strong>${format(v.total_gross)}</strong></td></tr>`;
+        html += `<tr><td>${v.vendor}</td><td class="center">${v.invoice_count}</td><td class="num">${format(v.total_net || "0")}</td><td class="num">${format(v.total_vat || "0")}</td><td class="num"><strong>${format(v.total_gross)}</strong></td></tr>`;
       }
-      html += `</tbody><tfoot><tr style="border-top:1px solid #292f3d"><td><strong>Razem</strong></td><td></td><td><strong>${format(totalNet.toFixed(2))}</strong></td><td><strong>${format(totalVat.toFixed(2))}</strong></td><td><strong>${format(total.toFixed(2))}</strong></td></tr></tfoot></table>`;
+      html += `</tbody><tfoot><tr><td><strong>Razem</strong></td><td></td><td class="num"><strong>${format(totalNet.toFixed(2))}</strong></td><td class="num"><strong>${format(totalVat.toFixed(2))}</strong></td><td class="num"><strong>${format(total.toFixed(2))}</strong></td></tr></tfoot></table>`;
       if (summary.by_category.length) {
         html += `<h3 style="margin-top:16px">Kategorie</h3><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">`;
         for (const c of summary.by_category) {
@@ -770,6 +844,7 @@
     const chartEl = $("trends-chart");
     const labelsEl = $("trends-labels");
     const tableEl = $("trends-table");
+    const tooltipEl = $("chart-tooltip");
     if (!months.length) {
       chartEl.innerHTML = "";
       labelsEl.innerHTML = "";
@@ -779,30 +854,64 @@
     const maxVal = Math.max(...months.map(m => parseFloat(m.total_gross)), 1);
     const monthShort = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
 
+    // Render bars with stagger animation and hover tooltips
     let chartHtml = "";
     let labelsHtml = "";
-    for (const m of months) {
+    months.forEach((m, i) => {
       const val = parseFloat(m.total_gross);
       const heightPct = Math.max((val / maxVal) * 100, 2);
       const isOverBudget = budget > 0 && val > budget;
       const isTight = budget > 0 && val > budget * 0.9 && val <= budget;
       const cls = isOverBudget ? "bad" : isTight ? "warn" : "ok";
       const valLabel = val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val.toFixed(0);
-      chartHtml += `<div class="bar-container"><div class="bar-value">${valLabel}</div><div class="bar ${cls}" style="height:${heightPct}%"></div></div>`;
+      const delay = i * 30;
+      chartHtml += `<div class="bar-container" data-idx="${i}"><div class="bar-value">${valLabel}</div><div class="bar ${cls}" style="--target-height:${heightPct}%;height:0%;animation-delay:${delay}ms"></div></div>`;
       labelsHtml += `<div class="bar-label">${monthShort[m.month - 1]}<br>${String(m.year).slice(2)}</div>`;
-    }
+    });
     chartEl.innerHTML = chartHtml;
     labelsEl.innerHTML = labelsHtml;
 
-    let tableHtml = `<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:13px"><thead><tr><th style="text-align:left">Miesiąc</th><th>Faktur</th><th>Netto</th><th>VAT</th><th style="text-align:right">Brutto</th></tr></thead><tbody>`;
+    // Animate bars to target height after DOM insertion
+    requestAnimationFrame(() => {
+      chartEl.querySelectorAll(".bar").forEach(bar => {
+        bar.style.height = bar.style.getPropertyValue("--target-height");
+      });
+    });
+
+    // Hover tooltips on bars
+    const showTooltip = (e, idx) => {
+      const m = months[idx];
+      const val = parseFloat(m.total_gross);
+      const net = parseFloat(m.total_net);
+      const vat = parseFloat(m.total_vat);
+      tooltipEl.innerHTML = `<div class="tt-month">${monthNames[m.month - 1]} ${m.year}</div><div class="tt-val">${format(val.toFixed(2))} zł</div><div class="tt-detail">${m.invoice_count} faktur · netto ${format(net.toFixed(2))} · VAT ${format(vat.toFixed(2))}</div>`;
+      tooltipEl.style.display = "block";
+      const rect = chartEl.parentElement.getBoundingClientRect();
+      tooltipEl.style.left = (e.clientX - rect.left + 12) + "px";
+      tooltipEl.style.top = (e.clientY - rect.top - 10) + "px";
+    };
+    const hideTooltip = () => { tooltipEl.style.display = "none"; };
+    chartEl.querySelectorAll(".bar-container").forEach(container => {
+      const idx = parseInt(container.dataset.idx, 10);
+      container.addEventListener("mouseenter", e => showTooltip(e, idx));
+      container.addEventListener("mousemove", e => showTooltip(e, idx));
+      container.addEventListener("mouseleave", hideTooltip);
+    });
+
+    // Compact data-table with proper alignment and stagger
+    let tableHtml = `<table class="data-table stagger"><thead><tr><th>Miesiąc</th><th class="center">Faktur</th><th class="num">Netto</th><th class="num">VAT</th><th class="num">Brutto</th></tr></thead><tbody>`;
     for (const m of months.slice().reverse()) {
-      tableHtml += `<tr><td>${monthNames[m.month - 1]} ${m.year}</td><td style="text-align:center">${m.invoice_count}</td><td>${format(m.total_net)}</td><td>${format(m.total_vat)}</td><td style="text-align:right"><strong>${format(m.total_gross)}</strong></td></tr>`;
+      tableHtml += `<tr><td>${monthNames[m.month - 1]} ${m.year}</td><td class="center">${m.invoice_count}</td><td class="num">${format(m.total_net)}</td><td class="num">${format(m.total_vat)}</td><td class="num"><strong>${format(m.total_gross)}</strong></td></tr>`;
     }
     tableHtml += `</tbody></table>`;
     tableEl.innerHTML = tableHtml;
   }
 
   $("ingest-email").onclick = async () => {
+    const btn = $("ingest-email");
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading"></span>Przetwarzam…';
     $("ingest-result").textContent = "Uruchamiam w tle…";
     try {
       // Snapshot the document count before ingest so we can detect
@@ -838,10 +947,11 @@
             $("ingest-result").textContent = `Przetwarzam… (poll ${polls}/${maxPolls})`;
           }
           if (polls < maxPolls) setTimeout(poll, pollDelay(polls));
+          else { btn.disabled = false; btn.textContent = origText; }
         } catch (e) { /* ignore poll errors */ }
       };
       setTimeout(poll, 5000);
-    } catch (e) { $("ingest-result").textContent = `Błąd: ${e.message}`; }
+    } catch (e) { $("ingest-result").textContent = `Błąd: ${e.message}`; btn.disabled = false; btn.textContent = origText; }
   };
   $("load-costs").onclick = () => loadCosts(costsYear, costsMonth);
 
@@ -849,6 +959,9 @@
   // avoids 401 console errors on first visit when no credentials are available.
   const hasToken = activeToken || localStorage.getItem("ledgerguard_token");
   if (hasToken) {
+    // Show skeleton placeholders while data loads
+    $("trends-table").innerHTML = '<div class="skeleton skeleton-line" style="width:60%"></div><div class="skeleton skeleton-line" style="width:80%"></div><div class="skeleton skeleton-line" style="width:50%"></div>';
+    $("costs-summary").innerHTML = '<div class="skeleton skeleton-line" style="width:70%"></div><div class="skeleton skeleton-line" style="width:90%"></div>';
     loadMonth();
     loadCosts();
     loadTrends();
