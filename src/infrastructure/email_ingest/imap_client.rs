@@ -178,7 +178,11 @@ fn search_and_extract(
                 let bytes = attachment.contents();
                 let mut hasher = Sha256::new();
                 hasher.update(bytes);
-                let hash = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
+                let hash = hasher
+                    .finalize()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>();
 
                 if known_hashes.contains(&hash) {
                     continue;

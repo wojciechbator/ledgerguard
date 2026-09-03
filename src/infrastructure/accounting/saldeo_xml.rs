@@ -63,9 +63,7 @@ pub fn normalize_document_list(
                     "gt" => Some(">".into()),
                     "apos" => Some("'".into()),
                     "quot" => Some("\"".into()),
-                    _ if name.starts_with('#') => {
-                        resolve_char_ref(&name[1..])
-                    }
+                    _ if name.starts_with('#') => resolve_char_ref(&name[1..]),
                     _ => {
                         // Unknown entity — keep the raw &name; form
                         text.push('&');
