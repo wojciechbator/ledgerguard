@@ -154,6 +154,83 @@
 }
 @media (max-width: 820px) { .status, .planner, .side { grid-column: span 12; } header { align-items: flex-start; flex-direction: column; } .tab-btn { padding: 8px 12px; font-size: 13px; } }
     @media (max-width: 560px) { main { width: min(100% - 20px, 1080px); padding-top: 24px; } .fields, .result, .actions { grid-template-columns: 1fr; } .tabs { flex-wrap: wrap; } }
+
+    /* ── Toast notifications ─────────────────────────────────────── */
+    .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .toast { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: var(--radius-md); border: 1px solid var(--border-default); background: var(--surface-2); box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: auto; animation: scaleIn var(--t-med); max-width: 360px; }
+    .toast.toast-success { border-color: rgba(61,220,132,0.3); }
+    .toast.toast-error { border-color: rgba(255,101,101,0.3); }
+    .toast.toast-info { border-color: var(--border-default); }
+    .toast-icon { font-size: 16px; flex-shrink: 0; }
+    .toast-success .toast-icon { color: var(--good); }
+    .toast-error .toast-icon { color: var(--bad); }
+    .toast-info .toast-icon { color: var(--text-secondary); }
+    .toast-text { flex: 1; font-size: 13px; line-height: 1.4; }
+    .toast-close { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 4px; font-size: 14px; width: auto; }
+    .toast-close:hover { color: var(--text-secondary); }
+
+    /* ── Empty state ──────────────────────────────────────────────── */
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 16px; text-align: center; gap: 8px; }
+    .empty-state-icon { color: var(--muted); opacity: 0.5; margin-bottom: 4px; }
+    .empty-state-label { font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+    .empty-state-hint { font-size: 12px; color: var(--muted); line-height: 1.5; max-width: 280px; }
+
+    /* ── Error card ───────────────────────────────────────────────── */
+    .error-card { padding: 16px; border-radius: var(--radius-md); border: 1px solid rgba(255,101,101,0.25); background: rgba(255,101,101,0.05); display: flex; flex-direction: column; gap: 8px; }
+    .error-card strong { color: var(--bad); font-size: 14px; }
+    .error-card p { color: var(--text-secondary); font-size: 13px; margin: 0; }
+    .error-card .mono { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-word; }
+    .error-card .form-actions { display: flex; gap: 8px; }
+    .error-card .form-actions button { width: auto; padding: 8px 16px; font-size: 13px; }
+
+    /* ── Layout-matching skeletons ────────────────────────────────── */
+    .skeleton-card { background: var(--surface-1); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 20px; }
+    .skeleton-status { grid-column: span 4; min-height: 96px; }
+    .skeleton-hero { height: 36px; width: 120px; margin-top: 4px; }
+    .skeleton-row { height: 40px; margin-bottom: 6px; }
+
+    /* ── Progress ring ────────────────────────────────────────────── */
+    .progress-ring-wrap { display: flex; align-items: center; gap: 16px; }
+    .progress-ring { position: relative; flex-shrink: 0; }
+    .progress-ring-value { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-weight: 800; font-variant-numeric: tabular-nums; }
+    .progress-ring-label { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 0.65rem; color: var(--muted); white-space: nowrap; }
+
+    /* ── Refresh control (Grafana-style) ───────────────────────────── */
+    .refresh-control { display: flex; align-items: center; gap: 8px; }
+    .refresh-timestamp { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .refresh-interval-select select { width: auto; padding: 6px 8px; font-size: 12px; border-radius: var(--radius-sm); }
+    .refresh-btn { width: auto; padding: 6px 10px; font-size: 13px; }
+    .refresh-btn svg { display: block; }
+    .refresh-btn.spinning svg { animation: spin .6s linear infinite; }
+
+    /* ── Confirm dialog ───────────────────────────────────────────── */
+    .dialog-overlay { position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; animation: fadeIn var(--t-fast); }
+    .dialog-panel { background: var(--surface-2); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 24px; max-width: 400px; width: calc(100% - 32px); box-shadow: 0 8px 32px rgba(0,0,0,0.4); animation: scaleIn var(--t-med); }
+    .dialog-panel:focus { outline: none; }
+    .confirm-dialog-title { margin: 0 0 8px; font-size: 16px; }
+    .confirm-dialog-body { margin: 0 0 16px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+    .confirm-dialog-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .confirm-dialog-actions button { width: auto; padding: 8px 18px; }
+    .confirm-dialog-actions .danger { background: var(--bad); }
+    .confirm-dialog-actions .danger:hover:not(:disabled) { background: #ff7878; }
+
+    /* ── Collapsible section ──────────────────────────────────────── */
+    .collapsible-section { overflow: hidden; }
+    .collapsible-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+    .collapsible-header h2 { margin: 0; }
+    .collapsible-chevron { transition: transform var(--t-med); flex-shrink: 0; }
+    .collapsible-chevron.rotated { transform: rotate(180deg); }
+    .collapsible-body { max-height: 5000px; transition: max-height var(--t-slow); overflow: hidden; }
+    .collapsible-body.collapsed { max-height: 0; }
+
+    /* ── Status badges ────────────────────────────────────────────── */
+    .badge-good { background: rgba(61,220,132,0.12); color: var(--good); border: 1px solid rgba(61,220,132,0.2); }
+    .badge-warn { background: rgba(245,185,66,0.12); color: var(--warn); border: 1px solid rgba(245,185,66,0.2); }
+    .badge-bad { background: rgba(255,101,101,0.12); color: var(--bad); border: 1px solid rgba(255,101,101,0.2); }
+    .badge-muted { background: var(--surface-3); color: var(--muted); border: 1px solid var(--border-default); }
+
+    /* ── Keyboard hint ───────────────────────────────────────────── */
+    kbd { display: inline-block; padding: 2px 6px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--surface-3); font-family: var(--mono); font-size: 11px; color: var(--text-secondary); }
   </style>
 </head>
 <body>
@@ -164,7 +241,24 @@
       <h1>LedgerGuard</h1>
       <p style="margin:8px 0 0">Jedna liczba, która ma znaczenie: ile możesz bezpiecznie wydać.</p>
     </div>
-    <span class="pill" id="connection">API: niepołączone</span>
+    <div style="display:flex;gap:12px;align-items:center">
+      <div class="refresh-control" id="refresh-control">
+        <span class="refresh-timestamp" id="refresh-timestamp"></span>
+        <div class="refresh-interval-select">
+          <select id="refresh-interval" aria-label="Auto-refresh interval">
+            <option value="0">Off</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+            <option value="30000">30s</option>
+            <option value="60000">1m</option>
+          </select>
+        </div>
+        <button class="secondary refresh-btn" id="refresh-now" title="Refresh now (R)" aria-label="Refresh">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+        </button>
+      </div>
+      <span class="pill" id="connection">API: niepołączone</span>
+    </div>
   </header>
 
   <nav class="tabs">
@@ -201,11 +295,16 @@
           <div><div class="label">Netto</div><div class="hero" id="month-net" style="font-size:28px">&mdash;</div></div>
         </div>
         <div class="cost-progress-wrap" style="margin-top:16px">
-          <div class="cost-progress-label">Koszty vs przychody: <span id="cost-ratio">—</span></div>
-          <div class="cost-progress-track">
-            <div class="cost-progress-fill" id="cost-progress-fill" style="width:0%"></div>
+          <div class="progress-ring-wrap">
+            <div id="cost-progress-ring"></div>
+            <div style="flex:1">
+              <div class="cost-progress-label">Koszty vs przychody: <span id="cost-ratio">—</span></div>
+              <div class="cost-progress-track">
+                <div class="cost-progress-fill" id="cost-progress-fill" style="width:0%"></div>
+              </div>
+              <div class="notice" id="cost-verdict" style="margin-top:6px">—</div>
+            </div>
           </div>
-          <div class="notice" id="cost-verdict" style="margin-top:6px">—</div>
         </div>
         <div class="notice" id="month-detail" style="margin-top:12px">Wczytuje...</div>
         <div class="invoice-list" id="recent-invoices"></div>
@@ -224,14 +323,19 @@
   <!-- ==================== TAB: KOSZTY ==================== -->
   <section class="tab-content" data-tab="costs">
     <div class="grid">
-      <article class="card">
-        <h2>Trendy kosztów (12 miesięcy)</h2>
-        <div style="position:relative">
-          <div id="trends-chart" style="display:flex;align-items:flex-end;gap:6px;height:160px;margin:16px 0 8px;padding:0 4px"></div>
-          <div id="trends-labels" style="display:flex;gap:6px;margin-bottom:12px;padding:0 4px"></div>
-          <div id="chart-tooltip" class="chart-tooltip" style="display:none"></div>
+      <article class="card collapsible-section">
+        <div class="collapsible-header" id="trends-header">
+          <h2>Trendy kosztów (12 miesięcy)</h2>
+          <svg class="collapsible-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </div>
-        <div id="trends-table"></div>
+        <div class="collapsible-body" id="trends-body">
+          <div style="position:relative">
+            <div id="trends-chart" style="display:flex;align-items:flex-end;gap:6px;height:160px;margin:16px 0 8px;padding:0 4px"></div>
+            <div id="trends-labels" style="display:flex;gap:6px;margin-bottom:12px;padding:0 4px"></div>
+            <div id="chart-tooltip" class="chart-tooltip" style="display:none"></div>
+          </div>
+          <div id="trends-table"></div>
+        </div>
       </article>
 
       <article class="card">
@@ -309,18 +413,23 @@
         <div class="notice" id="sync-result"></div>
       </article>
 
-      <aside class="card side">
-        <h2>Dodaj pozycję ręcznie</h2>
-        <div class="fields" style="margin-top:10px">
-          <label>Typ
-            <select id="manual-kind"><option value="expense">Koszt</option><option value="revenue">Przychód</option></select>
-          </label>
-          <label>Kwota brutto <input id="manual-gross" inputmode="decimal" placeholder="np. 239.00"></label>
-          <label>Data (opcjonalnie) <input id="manual-date" type="date"></label>
-          <label>Kategoria (opcjonalnie) <input id="manual-category" placeholder="np. marketing"></label>
+      <aside class="card side collapsible-section">
+        <div class="collapsible-header" id="manual-header">
+          <h2>Dodaj pozycję ręcznie</h2>
+          <svg class="collapsible-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </div>
-        <button id="manual-add" class="secondary" style="margin-top:10px">Zapisz pozycję</button>
-        <div class="notice" id="manual-result">Wpis trafi do księgi z źródłem „manual”.</div>
+        <div class="collapsible-body collapsed" id="manual-body">
+          <div class="fields" style="margin-top:10px">
+            <label>Typ
+              <select id="manual-kind"><option value="expense">Koszt</option><option value="revenue">Przychód</option></select>
+            </label>
+            <label>Kwota brutto <input id="manual-gross" inputmode="decimal" placeholder="np. 239.00"></label>
+            <label>Data (opcjonalnie) <input id="manual-date" type="date"></label>
+            <label>Kategoria (opcjonalnie) <input id="manual-category" placeholder="np. marketing"></label>
+          </div>
+          <button id="manual-add" class="secondary" style="margin-top:10px">Zapisz pozycję</button>
+          <div class="notice" id="manual-result">Wpis trafi do księgi z źródłem „manual”.</div>
+        </div>
       </aside>
 
     </div>
@@ -343,6 +452,160 @@
 
   const format = value => `${value} zł`;
   const decisionClass = value => value === "healthy" ? "ok" : value === "tight" ? "warn" : "bad";
+  const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+  // ── Toast notifications ──────────────────────────────────────────
+  const toastContainer = $("toast-container");
+  let toastId = 0;
+  function toastDismiss(id) {
+    const el = toastContainer?.querySelector(`[data-toast-id="${id}"]`);
+    if (el) { el.style.opacity = "0"; setTimeout(() => el.remove(), 200); }
+  }
+  function toastPush(kind, text, duration = 4000) {
+    if (!toastContainer) return;
+    const id = ++toastId;
+    const icon = kind === "success" ? "✓" : kind === "error" ? "✕" : "ℹ";
+    const el = document.createElement("div");
+    el.className = `toast toast-${kind}`;
+    el.dataset.toastId = id;
+    el.innerHTML = `<span class="toast-icon" aria-hidden="true">${icon}</span><span class="toast-text">${text}</span><button class="toast-close" type="button" aria-label="Dismiss">✕</button>`;
+    el.querySelector(".toast-close").onclick = () => toastDismiss(id);
+    toastContainer.appendChild(el);
+    if (duration > 0) setTimeout(() => toastDismiss(id), duration);
+  }
+  const toast = {
+    success: t => toastPush("success", t),
+    error: (t, d) => toastPush("error", t, d ?? 6000),
+    info: t => toastPush("info", t),
+  };
+
+  // ── Empty state ──────────────────────────────────────────────────
+  function renderEmptyState(label, hint) {
+    return `<div class="empty-state"><div class="empty-state-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><strong class="empty-state-label">${label}</strong>${hint ? `<p class="empty-state-hint">${hint}</p>` : ""}</div>`;
+  }
+
+  // ── Error card ──────────────────────────────────────────────────
+  function renderErrorCard(message, onRetry) {
+    return `<div class="error-card" role="alert"><strong>Coś poszło nie tak</strong><p>Reszta dashboardu działa normalnie.</p><small class="mono">${message}</small><div class="form-actions"><button type="button" class="secondary error-retry">Spróbuj ponownie</button></div></div>`;
+  }
+  function bindErrorRetry(container, onRetry) {
+    const btn = container.querySelector(".error-retry");
+    if (btn && onRetry) btn.onclick = onRetry;
+  }
+
+  // ── CountUp animation ───────────────────────────────────────────
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+  function countUp(el, target, formatter, duration = 600) {
+    if (prefersReducedMotion() || target === 0) { el.textContent = formatter(target); return; }
+    const startVal = parseFloat(el.dataset.value || "0");
+    const delta = target - startVal;
+    if (delta === 0) { el.textContent = formatter(target); return; }
+    const start = performance.now();
+    let rafId = 0;
+    const tick = now => {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const current = startVal + delta * easeOutCubic(progress);
+      el.textContent = formatter(current);
+      if (progress < 1) rafId = requestAnimationFrame(tick);
+      else { el.textContent = formatter(target); el.dataset.value = String(target); rafId = 0; }
+    };
+    if (el._rafId) cancelAnimationFrame(el._rafId);
+    rafId = requestAnimationFrame(tick);
+    el._rafId = rafId;
+  }
+
+  // ── Progress ring ───────────────────────────────────────────────
+  function renderProgressRing(value, size = 64, strokeWidth = 5, label) {
+    const clamped = Math.max(0, Math.min(100, value));
+    const r = (size - strokeWidth) / 2;
+    const circ = 2 * Math.PI * r;
+    const tone = clamped >= 75 ? "good" : clamped >= 50 ? "warn" : "bad";
+    const colors = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", muted: "var(--muted)" };
+    const color = colors[tone] || "var(--accent)";
+    const offset = circ - (clamped / 100) * circ;
+    return `<div class="progress-ring" style="width:${size}px;height:${size}px;position:relative">
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="${strokeWidth}"/>
+        <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-dasharray="${circ}" stroke-dashoffset="${offset}" transform="rotate(-90 ${size/2} ${size/2})" style="transition:stroke-dashoffset .8s cubic-bezier(0.16,1,0.3,1)"/>
+      </svg>
+      <span class="progress-ring-value" style="font-size:${size*0.22}px;color:${color}">${Math.round(clamped)}${label ? "" : "%"}</span>
+      ${label ? `<span class="progress-ring-label">${label}</span>` : ""}
+    </div>`;
+  }
+
+  // ── Confirm dialog ──────────────────────────────────────────────
+  function confirmAction({ title, body, confirmLabel, cancelLabel, destructive }) {
+    return new Promise(resolve => {
+      const host = $("confirm-host");
+      if (!host) { resolve(window.confirm(title)); return; }
+      const overlay = document.createElement("div");
+      overlay.className = "dialog-overlay";
+      overlay.innerHTML = `<div class="dialog-panel" role="dialog" aria-modal="true" aria-label="${title}" tabindex="-1"><h3 class="confirm-dialog-title">${title}</h3>${body ? `<p class="confirm-dialog-body">${body}</p>` : ""}<div class="confirm-dialog-actions"><button type="button" class="secondary confirm-cancel">${cancelLabel || "Anuluj"}</button><button type="button" class="${destructive ? "danger" : ""} confirm-ok">${confirmLabel || "Potwierdź"}</button></div></div>`;
+      host.appendChild(overlay);
+      const panel = overlay.querySelector(".dialog-panel");
+      const settle = ok => { overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(ok); };
+      const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); settle(false); } };
+      document.addEventListener("keydown", onKey, true);
+      overlay.onclick = e => { if (e.target === overlay) settle(false); };
+      overlay.querySelector(".confirm-cancel").onclick = () => settle(false);
+      overlay.querySelector(".confirm-ok").onclick = () => settle(true);
+      queueMicrotask(() => panel.focus());
+    });
+  }
+
+  // ── Collapsible section ─────────────────────────────────────────
+  function makeCollapsible(headerEl, bodyEl, defaultOpen = true) {
+    if (!headerEl || !bodyEl) return;
+    const chevron = headerEl.querySelector(".collapsible-chevron");
+    if (!defaultOpen) { bodyEl.classList.add("collapsed"); chevron?.classList.add("rotated"); }
+    headerEl.onclick = () => {
+      const collapsed = bodyEl.classList.toggle("collapsed");
+      chevron?.classList.toggle("rotated", collapsed);
+    };
+  }
+
+  // ── Refresh control ─────────────────────────────────────────────
+  let refreshIntervalMs = 0;
+  let refreshTimer = null;
+  let lastRefreshAt = null;
+  function triggerRefresh() {
+    lastRefreshAt = Date.now();
+    if (hasToken()) { loadMonth(); loadCosts(); loadTrends(); loadThomannBudget(); status(); }
+    updateRefreshTimestamp();
+  }
+  function hasToken() { return activeToken || localStorage.getItem("ledgerguard_token"); }
+  function updateRefreshTimestamp() {
+    const el = $("refresh-timestamp");
+    if (!el) return;
+    if (!lastRefreshAt) { el.textContent = ""; return; }
+    const s = Math.floor((Date.now() - lastRefreshAt) / 1000);
+    el.textContent = s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.floor(s/60)}m ago`;
+  }
+  setInterval(updateRefreshTimestamp, 5000);
+  $("refresh-interval").onchange = e => {
+    refreshIntervalMs = Number(e.target.value);
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    if (refreshIntervalMs > 0) refreshTimer = setInterval(triggerRefresh, refreshIntervalMs);
+  };
+  $("refresh-now").onclick = () => {
+    const btn = $("refresh-now");
+    btn.classList.add("spinning");
+    triggerRefresh();
+    setTimeout(() => btn.classList.remove("spinning"), 600);
+  };
+
+  // ── Keyboard shortcuts ─────────────────────────────────────────
+  document.addEventListener("keydown", e => {
+    const tag = (e.target.tagName || "").toUpperCase();
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "r" || e.key === "R") { e.preventDefault(); $("refresh-now").click(); }
+    else if (e.key === "1") { e.preventDefault(); switchTab("overview"); }
+    else if (e.key === "2") { e.preventDefault(); switchTab("costs"); }
+    else if (e.key === "3") { e.preventDefault(); switchTab("thomann"); }
+    else if (e.key === "4") { e.preventDefault(); switchTab("settings"); }
+  });
 
   // --- Tab navigation ---
   function switchTab(name) {
@@ -424,7 +687,7 @@
     try {
       const s = await api("/v1/system/status");
       $("connection").textContent = "API: połączone";
-      $("connection").className = "pill ok";
+      $("connection").className = "pill badge-good";
       $("provider").textContent = s.provider.provider;
       $("provider-detail").textContent = s.provider.configured ? "credentiale obecne" : "czeka na credentiale";
       $("sync-state").textContent = s.live_sync_ready ? "READY" : "OFF";
@@ -433,7 +696,7 @@
       $("version").textContent = s.version;
     } catch (e) {
       $("connection").textContent = "API: wymaga tokenu";
-      $("connection").className = "pill warn";
+      $("connection").className = "pill badge-warn";
       $("provider-detail").textContent = e.message;
     }
   }
@@ -472,21 +735,27 @@
 
     try {
       await Promise.all([status(), loadMonth(), loadCosts(), loadTrends(), loadThomannBudget()]);
-      $("sync-result").textContent = activeToken !== bootstrap
-        ? "✓ Połączono (token urządzenia aktywny)."
-        : "✓ Połączono z API.";
+      toast.success(activeToken !== bootstrap ? "Połączono (token urządzenia aktywny)." : "Połączono z API.");
+      $("sync-result").textContent = "";
     } catch (e) {
-      $("sync-result").textContent = "Błąd: " + e.message;
+      toast.error("Błąd połączenia: " + e.message);
     }
     btn.disabled = false;
     btn.textContent = origText;
   };
-  $("forget-token").onclick = () => {
+  $("forget-token").onclick = async () => {
+    const ok = await confirmAction({
+      title: "Zapomnieć token?",
+      body: "Token zostanie usunięty z tej przeglądarki. Musisz wpisać go ponownie, aby połączyć się z API.",
+      confirmLabel: "Zapomnij",
+      destructive: true,
+    });
+    if (!ok) return;
     localStorage.removeItem("ledgerguard_token");
     localStorage.removeItem("ledgerguard_device_token");
     activeToken = "";
     tokenInput.value = "";
-    $("sync-result").textContent = "Token usunięty z tej przeglądarki.";
+    toast.info("Token usunięty z tej przeglądarki.");
   };
   $("sync").onclick = async () => {
     const btn = $("sync");
@@ -496,9 +765,9 @@
     const now = new Date();
     try {
       const r = await api("/v1/accounting/sync", {method:"POST", body:JSON.stringify({year:now.getFullYear(), month:now.getMonth()+1})});
-      $("sync-result").textContent = `Sync OK: ${r.persisted ?? r.records ?? "gotowe"}`;
+      toast.success(`Sync OK: ${r.persisted ?? r.records ?? "gotowe"}`);
       await status();
-    } catch (e) { $("sync-result").textContent = e.message; }
+    } catch (e) { toast.error(e.message); }
     btn.disabled = false;
     btn.textContent = origText;
   };
@@ -514,20 +783,25 @@
       const projected = actualIncome === 0 && expectedIncome > 0;
       const displayIncome = projected ? expectedIncome : actualIncome;
       const displayNet = displayIncome - costs;
-      $("month-income").textContent = format(displayIncome.toFixed(2));
-      $("month-costs").textContent = format(m.costs);
+      const fmtMoney = v => format(v.toFixed(2));
+      countUp($("month-income"), displayIncome, fmtMoney);
+      countUp($("month-costs"), costs, fmtMoney);
       const netEl = $("month-net");
-      netEl.textContent = format(displayNet.toFixed(2));
+      countUp(netEl, displayNet, fmtMoney);
       netEl.className = `hero ${displayNet < 0 ? "bad" : "ok"}`;
       const projectionNote = projected ? " (plan)" : "";
       $("month-detail").textContent = `${m.entries} pozycji w księdze${projectionNote}.`;
 
-      // Cost-to-income progress bar
+      // Cost-to-income progress ring + bar
       const ratio = displayIncome > 0 ? (costs / displayIncome) * 100 : 0;
       const fillEl = $("cost-progress-fill");
       fillEl.style.width = Math.min(ratio, 100) + "%";
       fillEl.className = "cost-progress-fill " + (ratio > 90 ? "bad" : ratio > 70 ? "warn" : "ok");
       $("cost-ratio").textContent = ratio.toFixed(1) + "%";
+      // Budget health ring: invert ratio so 100% = all budget available
+      const budgetHealth = Math.max(0, 100 - ratio);
+      const ringEl = $("cost-progress-ring");
+      if (ringEl) ringEl.innerHTML = renderProgressRing(budgetHealth, 56, 5, "budget");
       const verdictEl = $("cost-verdict");
       if (ratio > 90) {
         verdictEl.textContent = "Przekroczone — koszty pochłaniają ponad 90% przychodów.";
@@ -541,18 +815,24 @@
       }
 
       // Mirror to overview status cards
-      $("overview-costs").textContent = format(costs.toFixed(2));
+      countUp($("overview-costs"), costs, fmtMoney);
       $("overview-costs-detail").textContent = `${m.entries} pozycji w księdze${projectionNote}`;
-      $("overview-income").textContent = format(displayIncome.toFixed(2));
+      countUp($("overview-income"), displayIncome, fmtMoney);
       $("overview-income-detail").textContent = projected ? "Przychód jako plan" : "Przychód rzeczywisty";
-      $("overview-net").textContent = format(displayNet.toFixed(2));
+      countUp($("overview-net"), displayNet, fmtMoney);
       $("overview-net").className = `big ${displayNet < 0 ? "bad" : "ok"}`;
       $("overview-net-detail").textContent = projected ? "Przychód jako plan" : "Przychód rzeczywisty";
 
       // Render recent invoices in overview
       renderRecentInvoices(m.recent || []);
     } catch (e) {
-      $("month-detail").textContent = `Błąd: ${e.message}`;
+      $("month-detail").textContent = "";
+      const el = $("month-detail").parentElement;
+      const errHtml = renderErrorCard(e.message, () => { loadMonth(); });
+      const existing = el.querySelector(".error-card");
+      if (existing) existing.remove();
+      el.insertAdjacentHTML("beforeend", errHtml);
+      bindErrorRetry(el, () => { el.querySelector(".error-card")?.remove(); loadMonth(); });
     }
   }
 
@@ -591,7 +871,7 @@
       }
       $("afford-result").replaceChildren(verdict, detail);
       await loadMonth();
-    } catch (e) { $("afford-result").textContent = e.message; }
+    } catch (e) { toast.error(e.message); }
   };
 
   $("manual-add").onclick = async () => {
@@ -602,10 +882,10 @@
     if ($("manual-category").value.trim()) body.category = $("manual-category").value.trim();
     try {
       await api("/v1/ledger/manual", { method: "POST", body: JSON.stringify(body) });
-      $("manual-result").textContent = "Zapisano.";
+      toast.success("Zapisano pozycję do księgi.");
       $("manual-gross").value = ""; $("manual-category").value = "";
       await loadMonth();
-    } catch (e) { $("manual-result").textContent = e.message; }
+    } catch (e) { toast.error(e.message); }
   };
 
   // --- Thomann tab ---
@@ -715,7 +995,8 @@
       $("thomann-check").disabled = false;
       $("thomann-check").textContent = "Sprawdź ceny i budżet";
     } catch (e) {
-      $("thomann-status").textContent = "Błąd: " + e.message;
+      toast.error("Thomann: " + e.message);
+      $("thomann-status").textContent = "";
       $("thomann-check").disabled = false;
       $("thomann-check").textContent = "Sprawdź ceny i budżet";
     }
@@ -786,9 +1067,10 @@
     try {
       const r = await api("/v1/budget", { method: "POST", body: JSON.stringify(body) });
       invalidateBudgetCache();
-      $("thomann-budget-status").textContent = "✓ Zapisano. Dochód: " + r.monthly_income + " PLN";
+      toast.success(`Zapisano. Dochód: ${r.monthly_income} PLN`);
+      $("thomann-budget-status").textContent = "";
       $("thomann-budget-thresholds").innerHTML = `Budżet 70%: <strong>${format(r.healthy_ceiling)}</strong> · Stretch 80%: <strong>${format(r.stretch_ceiling)}</strong> · Max 85%: <strong>${format(r.max_ceiling)}</strong> PLN`;
-    } catch (e) { $("thomann-budget-status").textContent = "Błąd: " + e.message; }
+    } catch (e) { toast.error("Błąd zapisu budżetu: " + e.message); $("thomann-budget-status").textContent = ""; }
   };
 
   async function loadCosts(year, month) {
@@ -802,7 +1084,7 @@
       el.innerHTML = "";
 
       if (!summary.by_vendor.length) {
-        el.innerHTML = "<p class='notice'>Brak kosztów email-OCR w tym miesiącu.</p>";
+        el.innerHTML = renderEmptyState("Brak kosztów", "Faktury kosztowe z tego miesiąca pojawią się tu po ingestem email-OCR.");
         return;
       }
       const total = summary.by_vendor.reduce((s, v) => s + parseFloat(v.total_gross), 0);
@@ -822,7 +1104,8 @@
       }
       el.innerHTML = html;
     } catch (e) {
-      $("costs-summary").innerHTML = `<p class="notice">Błąd: ${e.message}</p>`;
+      $("costs-summary").innerHTML = renderErrorCard(e.message, () => loadCosts(costsYear, costsMonth));
+      bindErrorRetry($("costs-summary"), () => loadCosts(costsYear, costsMonth));
     }
   }
   updateCostsLabel();
@@ -837,7 +1120,8 @@
       const budget = budgetResp && budgetResp.max_ceiling ? parseFloat(budgetResp.max_ceiling) : 0;
       renderTrends(r.months || [], budget);
     } catch (e) {
-      $("trends-table").innerHTML = `<p class="notice">Błąd: ${e.message}</p>`;
+      $("trends-table").innerHTML = renderErrorCard(e.message, () => loadTrends());
+      bindErrorRetry($("trends-table"), () => loadTrends());
     }
   }
   function renderTrends(months, budget) {
@@ -848,7 +1132,7 @@
     if (!months.length) {
       chartEl.innerHTML = "";
       labelsEl.innerHTML = "";
-      tableEl.innerHTML = "<p class='notice'>Brak danych.</p>";
+      tableEl.innerHTML = renderEmptyState("Brak danych trendów", "Koszty z ostatnich 12 miesięcy pojawią się tu po pierwszym ingestem.");
       return;
     }
     const maxVal = Math.max(...months.map(m => parseFloat(m.total_gross)), 1);
@@ -941,8 +1225,10 @@
           const newDocs = afterCount - beforeCount;
           if (newDocs > 0) {
             $("ingest-result").textContent = `Załadowano ${newDocs} nowych dokumentów. Koszty zaktualizowane.`;
+            toast.success(`Załadowano ${newDocs} nowych dokumentów.`);
           } else if (polls >= maxPolls) {
             $("ingest-result").textContent = "Brak nowych dokumentów. Wszystkie faktury z tego okresu były już przetworzone.";
+            toast.info("Brak nowych dokumentów.");
           } else {
             $("ingest-result").textContent = `Przetwarzam… (poll ${polls}/${maxPolls})`;
           }
@@ -951,14 +1237,14 @@
         } catch (e) { /* ignore poll errors */ }
       };
       setTimeout(poll, 5000);
-    } catch (e) { $("ingest-result").textContent = `Błąd: ${e.message}`; btn.disabled = false; btn.textContent = origText; }
+    } catch (e) { toast.error(`Błąd ingestu: ${e.message}`); btn.disabled = false; btn.textContent = origText; }
   };
   $("load-costs").onclick = () => loadCosts(costsYear, costsMonth);
 
   // Auto-load data if a device token or bootstrap token is already stored —
   // avoids 401 console errors on first visit when no credentials are available.
-  const hasToken = activeToken || localStorage.getItem("ledgerguard_token");
-  if (hasToken) {
+  const hasStoredToken = activeToken || localStorage.getItem("ledgerguard_token");
+  if (hasStoredToken) {
     // Show skeleton placeholders while data loads
     $("trends-table").innerHTML = '<div class="skeleton skeleton-line" style="width:60%"></div><div class="skeleton skeleton-line" style="width:80%"></div><div class="skeleton skeleton-line" style="width:50%"></div>';
     $("costs-summary").innerHTML = '<div class="skeleton skeleton-line" style="width:70%"></div><div class="skeleton skeleton-line" style="width:90%"></div>';
@@ -969,9 +1255,15 @@
     status();
   } else {
     $("month-detail").textContent = "Wpisz token API w zakładce Ustawienia, aby załadować dane.";
-    $("costs-summary").innerHTML = "<p class='notice'>Połącz się z API, aby zobaczyć koszty.</p>";
+    $("costs-summary").innerHTML = renderEmptyState("Brak połączenia", "Połącz się z API w zakładce Ustawienia, aby zobaczyć koszty.");
   }
+
+  // Initialize collapsible sections
+  makeCollapsible($("trends-header"), $("trends-body"), true);
+  makeCollapsible($("manual-header"), $("manual-body"), false);
 })();
 </script>
+<div id="toast-container" class="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>
+<div id="confirm-host"></div>
 </body>
 </html>

@@ -59,6 +59,30 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_has_ux_primitives() {
+        // Toast container — unified mutation feedback across all actions.
+        assert!(DASHBOARD_HTML.contains(r#"id="toast-container""#));
+        // Confirm dialog host — replaces window.confirm for destructive actions.
+        assert!(DASHBOARD_HTML.contains(r#"id="confirm-host""#));
+        // Refresh control — Grafana-style interval dropdown + manual button.
+        assert!(DASHBOARD_HTML.contains(r#"id="refresh-control""#));
+        assert!(DASHBOARD_HTML.contains(r#"id="refresh-interval""#));
+        // Progress ring — animated SVG for budget health.
+        assert!(DASHBOARD_HTML.contains(r#"id="cost-progress-ring""#));
+        // Collapsible sections — trends and manual entry.
+        assert!(DASHBOARD_HTML.contains(r#"id="trends-header""#));
+        assert!(DASHBOARD_HTML.contains(r#"id="manual-body""#));
+        // Empty state and error card helpers exist in JS.
+        assert!(DASHBOARD_HTML.contains("renderEmptyState"));
+        assert!(DASHBOARD_HTML.contains("renderErrorCard"));
+        // CountUp animation helper.
+        assert!(DASHBOARD_HTML.contains("countUp"));
+        // Keyboard shortcuts (R = refresh, 1-4 = tabs).
+        assert!(DASHBOARD_HTML.contains("switchTab(\"overview\""));
+        assert!(DASHBOARD_HTML.contains("switchTab(\"costs\""));
+    }
+
+    #[test]
     fn thomann_page_is_embedded_and_uses_api_endpoints() {
         assert!(THOMANN_HTML.contains("<title>Thomann"));
         assert!(THOMANN_HTML.contains("/v1/thomann/resolve"));
@@ -69,6 +93,15 @@ mod tests {
         assert!(!THOMANN_HTML.contains("<script src="));
         assert!(!THOMANN_HTML.contains("<link href="));
         assert!(!THOMANN_HTML.contains("<img src="));
+    }
+
+    #[test]
+    fn thomann_page_has_ux_primitives() {
+        // Toast container for mutation feedback.
+        assert!(THOMANN_HTML.contains(r#"id="toast-container""#));
+        // Empty state and error card helpers in JS.
+        assert!(THOMANN_HTML.contains("renderEmptyState"));
+        assert!(THOMANN_HTML.contains("renderErrorCard"));
     }
 
     #[tokio::test]

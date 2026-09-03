@@ -40,6 +40,26 @@ td.error{color:var(--bad);font-size:.8rem}
 @keyframes spin{to{transform:rotate(360deg)}}
 .token-row{display:flex;gap:8px;align-items:center;margin-top:8px}
 .token-row input{flex:1;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px}
+.toast-container{position:fixed;bottom:20px;right:20px;z-index:1000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:var(--card);box-shadow:0 4px 16px rgba(0,0,0,0.3);pointer-events:auto;animation:fadeIn .2s;max-width:360px}
+.toast.toast-success{border-color:rgba(74,222,128,0.3)}
+.toast.toast-error{border-color:rgba(248,113,113,0.3)}
+.toast.toast-info{border-color:var(--border)}
+.toast-icon{font-size:16px;flex-shrink:0}
+.toast-success .toast-icon{color:var(--ok)}
+.toast-error .toast-icon{color:var(--bad)}
+.toast-info .toast-icon{color:var(--muted)}
+.toast-text{flex:1;font-size:13px;line-height:1.4}
+.toast-close{background:none;border:0;color:var(--muted);cursor:pointer;padding:2px 4px;font-size:14px}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 16px;text-align:center;gap:8px}
+.empty-state-icon{color:var(--muted);opacity:0.5;margin-bottom:4px}
+.empty-state-label{font-size:14px;font-weight:600;color:var(--text)}
+.empty-state-hint{font-size:12px;color:var(--muted);line-height:1.5;max-width:280px}
+.error-card{padding:16px;border-radius:8px;border:1px solid rgba(248,113,113,0.25);background:rgba(248,113,113,0.05);display:flex;flex-direction:column;gap:8px}
+.error-card strong{color:var(--bad);font-size:14px}
+.error-card p{color:var(--text);font-size:13px;margin:0}
+.error-card .mono{font-family:monospace;font-size:12px;color:var(--muted);word-break:break-word}
 </style>
 </head>
 <body>
@@ -100,6 +120,41 @@ td.error{color:var(--bad);font-size:.8rem}
     const n = parseFloat(amount);
     if (isNaN(n)) return amount;
     return n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // ── Toast notifications ──────────────────────────────────────────
+  const toastContainer = $("toast-container");
+  let toastId = 0;
+  function toastDismiss(id) {
+    const el = toastContainer?.querySelector(`[data-toast-id="${id}"]`);
+    if (el) { el.style.opacity = "0"; setTimeout(() => el.remove(), 200); }
+  }
+  function toastPush(kind, text, duration = 4000) {
+    if (!toastContainer) return;
+    const id = ++toastId;
+    const icon = kind === "success" ? "✓" : kind === "error" ? "✕" : "ℹ";
+    const el = document.createElement("div");
+    el.className = `toast toast-${kind}`;
+    el.dataset.toastId = id;
+    el.innerHTML = `<span class="toast-icon" aria-hidden="true">${icon}</span><span class="toast-text">${text}</span><button class="toast-close" type="button" aria-label="Dismiss">✕</button>`;
+    el.querySelector(".toast-close").onclick = () => toastDismiss(id);
+    toastContainer.appendChild(el);
+    if (duration > 0) setTimeout(() => toastDismiss(id), duration);
+  }
+  const toast = {
+    success: t => toastPush("success", t),
+    error: (t, d) => toastPush("error", t, d ?? 6000),
+    info: t => toastPush("info", t),
+  };
+
+  // ── Empty state ──────────────────────────────────────────────────
+  function renderEmptyState(label, hint) {
+    return `<div class="empty-state"><div class="empty-state-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><strong class="empty-state-label">${label}</strong>${hint ? `<p class="empty-state-hint">${hint}</p>` : ""}</div>`;
+  }
+
+  // ── Error card ──────────────────────────────────────────────────
+  function renderErrorCard(message) {
+    return `<div class="error-card" role="alert"><strong>Coś poszło nie tak</strong><p>Spróbuj ponownie za chwilę.</p><small class="mono">${message}</small></div>`;
   }
 
   $("resolve").onclick = async () => {
@@ -216,7 +271,9 @@ td.error{color:var(--bad);font-size:.8rem}
 
       $("resolve").disabled = false;
     } catch (e) {
-      $("status").textContent = "Błąd: " + e.message;
+      toast.error("Thomann: " + e.message);
+      $("status").textContent = "";
+      $("result").innerHTML = renderErrorCard(e.message);
       $("resolve").disabled = false;
     }
   };
@@ -234,6 +291,7 @@ td.error{color:var(--bad);font-size:.8rem}
       document.body.removeChild(ta);
     }
     $("copy-affiliate").textContent = "Skopiowano!";
+    toast.success("Skopiowano linki afiliacyjne.");
     setTimeout(() => { $("copy-affiliate").textContent = "Kopiuj linki afiliacyjne"; }, 2000);
   };
 
@@ -253,6 +311,7 @@ td.error{color:var(--bad);font-size:.8rem}
       document.body.removeChild(ta);
     }
     btn.textContent = "Skopiowano!";
+    toast.success("Skopiowano link.");
     setTimeout(() => { btn.textContent = "Kopiuj"; }, 2000);
   });
 
@@ -262,7 +321,7 @@ td.error{color:var(--bad);font-size:.8rem}
       const b = await api("/v1/budget");
       $("income-input").value = b.monthly_income;
       $("budget-thresholds").innerHTML = `Budżet 70%: <strong>${format(b.healthy_ceiling)}</strong> · Stretch 80%: <strong>${format(b.stretch_ceiling)}</strong> · Max 85%: <strong>${format(b.max_ceiling)}</strong> PLN`;
-    } catch (e) { $("budget-status").textContent = "Budżet: " + e.message; }
+    } catch (e) { $("budget-status").textContent = ""; $("budget-thresholds").innerHTML = renderErrorCard(e.message); }
   }
 
   $("save-budget").onclick = async () => {
@@ -272,9 +331,10 @@ td.error{color:var(--bad);font-size:.8rem}
     $("budget-status").textContent = "Zapisuję…";
     try {
       const r = await api("/v1/budget", { method: "POST", body: JSON.stringify(body) });
-      $("budget-status").textContent = "✓ Zapisano. Dochód: " + r.monthly_income + " PLN";
+      toast.success(`Zapisano. Dochód: ${r.monthly_income} PLN`);
+      $("budget-status").textContent = "";
       $("budget-thresholds").innerHTML = `Budżet 70%: <strong>${format(r.healthy_ceiling)}</strong> · Stretch 80%: <strong>${format(r.stretch_ceiling)}</strong> · Max 85%: <strong>${format(r.max_ceiling)}</strong> PLN`;
-    } catch (e) { $("budget-status").textContent = "Błąd: " + e.message; }
+    } catch (e) { toast.error("Błąd zapisu budżetu: " + e.message); $("budget-status").textContent = ""; }
   };
 
   // Only auto-load budget if a token is stored — avoids 401 console errors.
@@ -282,10 +342,11 @@ td.error{color:var(--bad);font-size:.8rem}
   if (hasToken) {
     loadBudget();
   } else {
-    $("budget-status").textContent = "Wpisz token API poniżej, aby załadować budżet.";
+    $("budget-thresholds").innerHTML = renderEmptyState("Brak połączenia", "Wpisz token API powyżej, aby załadować budżet.");
   }
 })();
 </script>
 </main>
+<div id="toast-container" class="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>
 </body>
 </html>
