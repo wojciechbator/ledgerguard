@@ -41,24 +41,48 @@ pub fn normalize_document_list(
                 }
             }
             Ok(Event::Text(text_event)) => {
+                if in_document {
+                    // In quick-xml 0.42, Text events contain only literal text
+                    // between entity references; entities arrive as GeneralRef.
+                    text.push_str(&text_event);
+                }
+            }
+            Ok(Event::GeneralRef(entity)) => {
                 if !in_document {
                     continue;
                 }
-                // Entities (&amp;, &lt;, numeric refs) travel inline inside
-                // Text events, so they must be decoded here or a contractor
-                // like "R&amp;D" would be stored literally corrupted. A value
-                // that fails to decode (e.g. a bare "&" in non-conformant
-                // XML) keeps its raw bytes: tolerance beats dropping data.
-                let decoded = text_event
-                    .unescape()
-                    .unwrap_or_else(|_| String::from_utf8_lossy(text_event.as_ref()));
-                text.push_str(&decoded);
+                // Entity references (&amp;, &lt;, &#322;) arrive as separate
+                // events in quick-xml 0.42. The content is the name between
+                // `&` and `;` (e.g. "amp", "lt", "#322"). Resolve predefined
+                // XML entities and numeric character references; unknown
+                // entities are kept as-is (&name;) for tolerance.
+                let name = &*entity;
+                let resolved: Option<String> = match name {
+                    "amp" => Some("&".into()),
+                    "lt" => Some("<".into()),
+                    "gt" => Some(">".into()),
+                    "apos" => Some("'".into()),
+                    "quot" => Some("\"".into()),
+                    _ if name.starts_with('#') => {
+                        resolve_char_ref(&name[1..])
+                    }
+                    _ => {
+                        // Unknown entity — keep the raw &name; form
+                        text.push('&');
+                        text.push_str(name);
+                        text.push(';');
+                        continue;
+                    }
+                };
+                if let Some(resolved) = resolved {
+                    text.push_str(&resolved);
+                }
             }
             Ok(Event::CData(cdata)) => {
                 // CDATA content is raw by definition (no entity encoding);
                 // absorbing it as plain text is the whole point of the fix.
                 if in_document {
-                    text.push_str(&String::from_utf8_lossy(cdata.as_ref()));
+                    text.push_str(cdata.as_ref());
                 }
             }
             Ok(Event::End(element)) => {
@@ -93,8 +117,19 @@ pub fn normalize_document_list(
     Ok(documents)
 }
 
-fn local_name(name: &[u8]) -> String {
-    String::from_utf8_lossy(name).into_owned()
+fn local_name(name: &str) -> String {
+    name.to_owned()
+}
+
+/// Resolves a numeric character reference body (e.g. "322" from "&#322;")
+/// or a hex reference body (e.g. "x142" from "&#x142;") to its character.
+fn resolve_char_ref(body: &str) -> Option<String> {
+    let code = if let Some(hex) = body.strip_prefix('x').or_else(|| body.strip_prefix('X')) {
+        u32::from_str_radix(hex, 16).ok()?
+    } else {
+        body.parse::<u32>().ok()?
+    };
+    char::from_u32(code).map(|c| c.to_string())
 }
 
 #[derive(Default)]
