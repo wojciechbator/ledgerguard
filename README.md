@@ -8,7 +8,10 @@ LedgerGuard combines current cash, committed costs, tax/VAT/ZUS reserves, a mini
 
 - **Normalized read model** — imports invoices, receipts, and commitments from accounting platforms into a neutral format. The accounting platform remains the source of truth; LedgerGuard stores a normalized copy plus planning policy.
 - **Cash planning** — calculates safe spending headroom from current cash minus committed costs, reserves, buffer, and planned purchases. The result is deterministic: same inputs, same answer, every time.
+- **Email ingest** — IMAP polling pulls invoices and receipts from the operator's mailbox, parses PDF attachments, classifies them by vendor, and stores them in the normalized read model. This is the active ingest path; provider sync is disabled in production.
+- **Thomann affiliate converter** — converts Thomann product URLs to affiliate links and crawls prices for basket affordability checks against the planning budget.
 - **Provider sync** — connects to SaldeoSMART, Fakturownia/InvoiceOcean, inFakt, and wFirma. Imports are idempotent: corrected provider data updates the normalized record rather than duplicating it.
+- **Device sessions** — operator authentication with session management.
 
 ## What it solves
 
